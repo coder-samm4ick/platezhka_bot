@@ -6,6 +6,8 @@ import json
 import sqlite3
 import logging
 import hashlib
+import asyncio
+import requests
 from datetime import datetime
 from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -25,9 +27,57 @@ CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
 # ========== НАСТРОЙКИ ==========
 CURRENCY_SYMBOL = "₽"
 BOT_USERNAME = "platezhka_robot"
+CURRENCY_UPDATE_INTERVAL = 3600  # Обновлять раз в час
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ========== КУРС ВАЛЮТ ==========
+
+class CurrencyManager:
+    def __init__(self):
+        self.usd_to_rub = 0
+        self.usdt_to_rub = 0
+        self.last_update = None
+        self.update_rates()
+    
+    def update_rates(self):
+        """Обновление курсов валют"""
+        try:
+            # Binance API для USDT/RUB
+            response = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=USDTTRY")
+            if response.status_code == 200:
+                data = response.json()
+                self.usdt_to_rub = float(data['price']) / 10
+            else:
+                # CoinGecko как запасной вариант
+                response = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=rub")
+                if response.status_code == 200:
+                    data = response.json()
+                    self.usdt_to_rub = data['tether']['rub']
+            
+            # Курс USD/RUB
+            response = requests.get("https://api.exchangerate-api.com/v4/latest/USD")
+            if response.status_code == 200:
+                data = response.json()
+                self.usd_to_rub = data['rates']['RUB']
+            
+            self.last_update = datetime.now()
+            logger.info(f"✅ Курс обновлён: 1 USDT = {self.usdt_to_rub:.2f} ₽, 1 USD = {self.usd_to_rub:.2f} ₽")
+            
+        except Exception as e:
+            logger.error(f"❌ Ошибка обновления курса: {e}")
+    
+    def get_usdt_rate(self):
+        return self.usdt_to_rub
+    
+    def get_usd_rate(self):
+        return self.usd_to_rub
+    
+    def rub_to_usdt(self, rub_amount):
+        if self.usdt_to_rub == 0:
+            return 0
+        return rub_amount / self.usdt_to_rub
 
 # ========== БАЗА ДАННЫХ ==========
 
@@ -40,7 +90,6 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         
-        # Товары
         c.execute("""CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -54,7 +103,6 @@ class Database:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
-        # Категории
         c.execute("""CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE,
@@ -62,7 +110,6 @@ class Database:
             sort_order INTEGER DEFAULT 0
         )""")
         
-        # Пользователи
         c.execute("""CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
@@ -74,7 +121,6 @@ class Database:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
-        # Корзина
         c.execute("""CREATE TABLE IF NOT EXISTS cart (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -83,7 +129,6 @@ class Database:
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
-        # Заказы
         c.execute("""CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_number TEXT UNIQUE,
@@ -97,7 +142,6 @@ class Database:
             updated_at TIMESTAMP
         )""")
         
-        # Промокоды
         c.execute("""CREATE TABLE IF NOT EXISTS promocodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE,
@@ -410,7 +454,7 @@ if not db.get_products():
     db.add_product("CEF Сборка Pro", "Максимальная производительность для киберспорта", 499.99, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
     db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite коллекции", 199.53, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
     db.add_product("CEF Сборка Mid", "Средний уровень для комфортной игры", 320.78, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
-    db.add_product("CEF Сборка Ultra", "Ультимативная сборка для профессионалов", 820.99, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ",)
+    db.add_product("CEF Сборка Ultra", "Ультимативная сборка для профессионалов", 820.99, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
     db.add_product("Курс по CEF", "Полный гайд по настройке CEF сборок", 389, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
 
 # Добавляем тестовые промокоды
@@ -424,6 +468,7 @@ class SalesBot:
         self.token = token
         self.db = db
         self.application = None
+        self.currency = CurrencyManager()
     
     def start(self):
         self.application = Application.builder().token(self.token).build()
@@ -437,6 +482,7 @@ class SalesBot:
         self.application.add_handler(CommandHandler("profile", self.profile_command))
         self.application.add_handler(CommandHandler("admin", self.admin_command))
         self.application.add_handler(CommandHandler("cancel", self.cancel_command))
+        self.application.add_handler(CommandHandler("update_currency", self.update_currency_command))
         
         # Callback'и
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
@@ -444,8 +490,35 @@ class SalesBot:
         # Сообщения
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
+        # Запускаем автообновление курса
+        self.start_currency_updater()
+        
         logger.info("🚀 Бот запущен!")
         self.application.run_polling()
+    
+    def start_currency_updater(self):
+        """Запуск периодического обновления курса раз в час"""
+        async def update_loop():
+            while True:
+                await asyncio.sleep(CURRENCY_UPDATE_INTERVAL)
+                self.currency.update_rates()
+                logger.info("🔄 Автообновление курса выполнено")
+        
+        asyncio.create_task(update_loop())
+    
+    async def update_currency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        if user_id not in ADMIN_IDS:
+            await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
+            return
+        
+        self.currency.update_rates()
+        await update.message.reply_text(
+            f"✅ *Курс обновлён*\n\n"
+            f"💰 1 USDT = {self.currency.usdt_to_rub:.2f} ₽\n"
+            f"💰 1 USD = {self.currency.usd_to_rub:.2f} ₽",
+            parse_mode="Markdown"
+        )
     
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
@@ -478,11 +551,7 @@ class SalesBot:
 /orders - Мои заказы
 /profile - Профиль
 /admin - Админ-панель (для админов)
-
-🛒 *Как сделать заказ:*
-1. Выбери товар
-2. Добавь в корзину
-3. Оформи заказ → оплата
+/update_currency - Обновить курс валют (админ)
 
 💎 *Бонусы:*
 За каждый заказ вы получаете 5% от суммы бонусами.
@@ -491,7 +560,7 @@ class SalesBot:
 🎁 *Промокоды:*
 В корзине можно ввести промокод для скидки.
 
-💬 *Вопросы?* @support
+💰 *Курс валют обновляется автоматически раз в час.*
         """
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
         if update.callback_query:
@@ -507,7 +576,7 @@ class SalesBot:
         keyboard.append([InlineKeyboardButton("🔄 Все товары", callback_data="category_all")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
         
-        text = "📦 *Каталог CEF сборок*\n\nВыбери категорию:"
+        text = "📦 *Каталог*\n\nВыбери категорию:"
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
@@ -580,7 +649,8 @@ class SalesBot:
         keyboard = []
         for p in products:
             digital = "🖥️ " if p.get('is_digital') else ""
-            text += f"🔹 {digital}*{p['name']}* — {p['price']:.2f} {CURRENCY_SYMBOL}\n"
+            usdt_price = self.currency.rub_to_usdt(p['price'])
+            text += f"🔹 {digital}*{p['name']}* — {p['price']:.2f} {CURRENCY_SYMBOL} (~{usdt_price:.2f} USDT)\n"
             keyboard.append([InlineKeyboardButton(f"👉 {p['name']}", callback_data=f"product_{p['id']}")])
         
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="catalog")])
@@ -593,8 +663,9 @@ class SalesBot:
             return
         
         digital_note = "\n🖥️ *Цифровой товар* — выдача после оплаты" if product.get('is_digital') else ""
+        usdt_price = self.currency.rub_to_usdt(product['price'])
         
-        text = f"🛍️ *{product['name']}*\n\n📝 {product['description']}\n💰 *Цена:* {product['price']:.2f} {CURRENCY_SYMBOL}\n📦 *В наличии:* {product['stock']} шт.{digital_note}"
+        text = f"🛍️ *{product['name']}*\n\n📝 {product['description']}\n💰 *Цена:* {product['price']:.2f} {CURRENCY_SYMBOL} (~{usdt_price:.2f} USDT)\n📦 *В наличии:* {product['stock']} шт.{digital_note}"
         
         keyboard = [
             [InlineKeyboardButton("🛒 Добавить в корзину", callback_data=f"add_to_cart_{product_id}")],
@@ -624,13 +695,16 @@ class SalesBot:
             keyboard.append([InlineKeyboardButton(f"❌ Убрать {item['name']}", callback_data=f"remove_from_cart_{item['product_id']}")])
         
         discount = context.user_data.get("promocode_discount", 0) if context else 0
+        usdt_total = self.currency.rub_to_usdt(total)
+        
         if discount > 0:
             new_total = total * (1 - discount / 100)
+            new_usdt_total = self.currency.rub_to_usdt(new_total)
             text += f"\n🎁 *Скидка:* {discount}%\n"
-            text += f"💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL}\n"
-            text += f"💰 *Итого со скидкой:* {new_total:.2f} {CURRENCY_SYMBOL}"
+            text += f"💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n"
+            text += f"💰 *Итого со скидкой:* {new_total:.2f} {CURRENCY_SYMBOL} (~{new_usdt_total:.2f} USDT)"
         else:
-            text += f"\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL}"
+            text += f"\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)"
         
         keyboard.append([InlineKeyboardButton("🎁 Ввести промокод", callback_data="enter_promocode")])
         keyboard.append([InlineKeyboardButton("🔄 Очистить", callback_data="clear_cart")])
@@ -698,13 +772,15 @@ class SalesBot:
             
             total = self.db.get_cart_total(user_id)
             discount = context.user_data.get("promocode_discount", 0)
+            usdt_total = self.currency.rub_to_usdt(total)
             
             if discount > 0:
                 final_total = total * (1 - discount / 100)
-                text = f"💳 *Оформление заказа*\n\n💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL}\n🎁 *Скидка:* {discount}%\n💰 *Итого со скидкой:* {final_total:.2f} {CURRENCY_SYMBOL}\n\nВыбери способ оплаты:"
+                final_usdt = self.currency.rub_to_usdt(final_total)
+                text = f"💳 *Оформление заказа*\n\n💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n🎁 *Скидка:* {discount}%\n💰 *Итого со скидкой:* {final_total:.2f} {CURRENCY_SYMBOL} (~{final_usdt:.2f} USDT)\n\nВыбери способ оплаты:"
             else:
                 final_total = total
-                text = f"💳 *Оформление заказа*\n\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL}\n\nВыбери способ оплаты:"
+                text = f"💳 *Оформление заказа*\n\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n\nВыбери способ оплаты:"
             
             keyboard = [
                 [InlineKeyboardButton("💳 FreeKassa", callback_data="pay_freekassa")],
@@ -729,7 +805,6 @@ class SalesBot:
             sign = hashlib.md5(f"{FREAKASSA_MERCHANT_ID}:{total_formatted}:{FREAKASSA_SECRET_KEY}:{order_id}".encode()).hexdigest()
             payment_url = f"https://pay.freekassa.ru/?m={FREAKASSA_MERCHANT_ID}&oa={total_formatted}&o={order_id}&s={sign}"
             
-            # Уведомление админу
             for admin_id in ADMIN_IDS:
                 try:
                     await context.bot.send_message(
@@ -762,7 +837,6 @@ class SalesBot:
             
             order_id, order_number = self.db.create_order(user_id, cart, final_total, "manual")
             
-            # Уведомление админу
             for admin_id in ADMIN_IDS:
                 try:
                     await context.bot.send_message(
@@ -799,12 +873,12 @@ class SalesBot:
             total = self.db.get_cart_total(user_id)
             order_id, order_number = self.db.create_order(user_id, cart, total, "cryptobot")
             
-            usdt_amount = total / 100
+            usdt_amount = self.currency.rub_to_usdt(total)
             
             await query.edit_message_text(
                 f"🪙 *Оплата через CryptoBot*\n\n"
                 f"📦 Заказ: #{order_number}\n"
-                f"💰 Сумма: {total:.2f} ₽ ≈ {usdt_amount:.2f} USDT\n\n"
+                f"💰 Сумма: {total:.2f} {CURRENCY_SYMBOL} ≈ {usdt_amount:.2f} USDT\n\n"
                 f"1️⃣ Напишите @CryptoBot\n"
                 f"2️⃣ Нажмите «Создать счёт»\n"
                 f"3️⃣ Введите сумму: {usdt_amount:.2f} USDT\n"
@@ -821,7 +895,6 @@ class SalesBot:
         elif data.startswith("manual_paid_"):
             order_id = int(data.replace("manual_paid_", ""))
             
-            # Уведомление админу о подтверждении
             for admin_id in ADMIN_IDS:
                 try:
                     await context.bot.send_message(
@@ -865,7 +938,8 @@ class SalesBot:
                 text = "📦 *Товары:*\n\n"
                 for p in products[:20]:
                     digital = "🖥️ " if p.get('is_digital') else ""
-                    text += f"• {digital}{p['name']} — {p['price']:.2f} {CURRENCY_SYMBOL} (в наличии: {p['stock']})\n"
+                    usdt_price = self.currency.rub_to_usdt(p['price'])
+                    text += f"• {digital}{p['name']} — {p['price']:.2f} {CURRENCY_SYMBOL} (~{usdt_price:.2f} USDT) (в наличии: {p['stock']})\n"
             
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -982,10 +1056,7 @@ class SalesBot:
             except Exception as e:
                 logger.error(f"Ошибка уведомления пользователя: {e}")
             
-            # Уведомление админу
             await query.edit_message_text(f"✅ *Заказ #{order['order_number']} подтверждён!*\n\n💎 Начислено бонусов: {bonus_points}", parse_mode="Markdown")
-            
-            # Обновляем список pending заказов
             await self.admin_command(update, context)
         
         elif data == "admin_stats":
