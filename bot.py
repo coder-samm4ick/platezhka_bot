@@ -12,12 +12,12 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== КОНФИГУРАЦИЯ ==========
-BOT_TOKEN = "8896855591:AAF837-w09REedQe2RCSzSJhlhT7BKUrEQ0"  # ЗАМЕНИТЬ НА СВОЙ ТОКЕН
-ADMIN_IDS = [8563327706]  # ЗАМЕНИТЬ НА СВОЙ ID
+BOT_TOKEN = "8896855591:AAF837-w09REedQe2RCSzSJhlhT7BKUrEQ0"
+ADMIN_IDS = [8563327706]
 
 # FreeKassa
-FREAKASSA_MERCHANT_ID = "74630"  # ИЗ ЛИЧНОГО КАБИНЕТА FREAKASSA
-FREAKASSA_SECRET_KEY = "989ce9d4a83698f3b510fed671f7f073"     # ИЗ НАСТРОЕК FREAKASSA
+FREAKASSA_MERCHANT_ID = "74630"
+FREAKASSA_SECRET_KEY = "989ce9d4a83698f3b510fed671f7f073"
 BOT_USERNAME = "platezhka_robot"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -156,6 +156,13 @@ class Database:
                     "category": row[4], "image_url": row[5], "stock": row[6], "is_digital": row[7], 
                     "digital_content": row[8]}
         return None
+    
+    def delete_product(self, product_id):
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        conn.commit()
+        conn.close()
     
     # ===== ПОЛЬЗОВАТЕЛИ =====
     def register_user(self, user_id, username=None, first_name=None, last_name=None):
@@ -399,6 +406,7 @@ class SalesBot:
         text = "👑 *Админ-панель*\n\n📌 Управление:"
         keyboard = [
             [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
+            [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
             [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
             [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
@@ -428,6 +436,7 @@ class SalesBot:
         text = f"🛍️ *{product['name']}*\n\n📝 {product['description']}\n💰 *Цена:* {product['price']:.2f} $\n📦 *В наличии:* {product['stock']} шт."
         keyboard = [
             [InlineKeyboardButton("🛒 Добавить в корзину", callback_data=f"add_to_cart_{product_id}")],
+            [InlineKeyboardButton("🗑 Удалить товар", callback_data=f"admin_delete_product_{product_id}")],
             [InlineKeyboardButton("🔙 Назад", callback_data=f"category_{product['category'] or 'all'}")]
         ]
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -540,13 +549,44 @@ class SalesBot:
             else:
                 await query.edit_message_text("⏳ *Заказ ещё не оплачен*\n\nПожалуйста, завершите оплату или проверьте позже.", parse_mode="Markdown")
         
+        # ===== АДМИНКА =====
+        elif data == "admin":
+            await self.admin_command(update, context)
+        
         elif data == "admin_products":
             products = self.db.get_products(limit=100)
-            text = "📦 *Товары:*\n\n"
-            for p in products[:10]:
-                text += f"• {p['name']} — {p['price']:.2f} $ (в наличии: {p['stock']})\n"
+            if not products:
+                text = "📦 *Товаров пока нет*"
+            else:
+                text = "📦 *Товары:*\n\n"
+                for p in products[:20]:
+                    text += f"• {p['name']} — {p['price']:.2f} $ (в наличии: {p['stock']})\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
+        elif data == "admin_add_product":
+            context.user_data["admin_mode"] = "add_product"
+            await query.edit_message_text(
+                "📝 *Добавление товара*\n\n"
+                "Отправь данные в формате:\n"
+                "`Название | Описание | Цена | Категория | Количество`\n\n"
+                "Пример:\n"
+                "`Наушники | Беспроводные наушники | 199.99 | Электроника | 30`\n\n"
+                "Для отмены отправь /cancel",
+                parse_mode="Markdown"
+            )
+        
+        elif data.startswith("admin_delete_product_"):
+            if user_id not in ADMIN_IDS:
+                await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
+                return
+            product_id = int(data.replace("admin_delete_product_", ""))
+            product = self.db.get_product(product_id)
+            if product:
+                self.db.delete_product(product_id)
+                await query.edit_message_text(f"✅ *Товар удалён:* {product['name']}", parse_mode="Markdown")
+            else:
+                await query.edit_message_text("❌ *Товар не найден*", parse_mode="Markdown")
         
         elif data == "admin_orders":
             orders = self.db.get_orders()
@@ -554,18 +594,73 @@ class SalesBot:
                 text = "📋 *Нет заказов*"
             else:
                 text = "📋 *Последние заказы:*\n\n"
-                for order in orders[:5]:
+                for order in orders[:10]:
                     text += f"📦 #{order['order_number']} — {order['total']:.2f} $ — {order['status']}\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         
         elif data == "admin_stats":
             stats = self.db.get_stats()
-            text = f"📊 *Статистика*\n\n👥 Пользователей: {stats['total_users']}\n📦 Заказов: {stats['total_orders']}\n💰 Выручка: {stats['total_revenue']:.2f} $\n📅 Сегодня: {stats['today_orders']}\n📦 В наличии: {stats['in_stock']}"
+            text = f"📊 *Статистика*\n\n"
+            text += f"👥 Пользователей: {stats['total_users']}\n"
+            text += f"📦 Заказов: {stats['total_orders']}\n"
+            text += f"💰 Выручка: {stats['total_revenue']:.2f} $\n"
+            text += f"📅 Заказов сегодня: {stats['today_orders']}\n"
+            text += f"📦 Товаров в наличии: {stats['in_stock']}"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        text = update.message.text
+        
+        # Режим добавления товара (админ)
+        if context.user_data.get("admin_mode") == "add_product":
+            if user_id not in ADMIN_IDS:
+                await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
+                context.user_data["admin_mode"] = None
+                return
+            
+            if text == "/cancel":
+                context.user_data["admin_mode"] = None
+                await update.message.reply_text("❌ *Добавление отменено*", parse_mode="Markdown")
+                return
+            
+            parts = text.split("|")
+            if len(parts) < 5:
+                await update.message.reply_text(
+                    "❌ *Неверный формат*\n\n"
+                    "Нужно: `Название | Описание | Цена | Категория | Количество`\n\n"
+                    "Пример:\n"
+                    "`Наушники | Беспроводные наушники | 199.99 | Электроника | 30`",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            try:
+                name = parts[0].strip()
+                description = parts[1].strip()
+                price = float(parts[2].strip())
+                category = parts[3].strip()
+                stock = int(parts[4].strip())
+                
+                product_id = self.db.add_product(name, description, price, category, stock=stock)
+                context.user_data["admin_mode"] = None
+                
+                await update.message.reply_text(
+                    f"✅ *Товар добавлен!*\n\n"
+                    f"📦 {name}\n"
+                    f"💰 {price:.2f} $\n"
+                    f"📂 {category}\n"
+                    f"📊 В наличии: {stock}\n"
+                    f"🆔 ID: {product_id}",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
+            return
+        
+        # Обычные сообщения
         await update.message.reply_text("❓ Используй кнопки или команды: /start, /catalog, /help")
 
 # ========== ЗАПУСК ==========
