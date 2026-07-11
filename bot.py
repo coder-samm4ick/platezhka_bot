@@ -7,17 +7,30 @@ import sqlite3
 import logging
 import hashlib
 from datetime import datetime
-from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== КОНФИГУРАЦИЯ ==========
 BOT_TOKEN = "8896855591:AAF837-w09REedQe2RCSzSJhlhT7BKUrEQ0"
-ADMIN_IDS = [8563327706]
+ADMIN_IDS = [8563327706]  # ТВОЙ ID
 
 # FreeKassa
 FREAKASSA_MERCHANT_ID = "74630"
 FREAKASSA_SECRET_KEY = "989ce9d4a83698f3b510fed671f7f073"
+
+# Реквизиты для ручной оплаты
+PAYMENT_DETAILS = """
+💳 *Реквизиты для оплаты:*
+
+• Карта: `5208 1300 1478 8552`
+• Получатель: Сергей.Р.Н
+• Банк: Альфа Банк
+• Сумма: {total} ₽
+
+📌 *В назначении платежа укажи:* `Заказ #{order_id}`
+"""
+
+CURRENCY_SYMBOL = "₽"
 BOT_USERNAME = "platezhka_robot"
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -33,65 +46,52 @@ class Database:
     def init_db(self):
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS products (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT,
-                price REAL NOT NULL,
-                category TEXT,
-                image_url TEXT,
-                stock INTEGER DEFAULT 999,
-                is_digital BOOLEAN DEFAULT 0,
-                digital_content TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS categories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT UNIQUE,
-                emoji TEXT,
-                sort_order INTEGER DEFAULT 0
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id INTEGER PRIMARY KEY,
-                username TEXT,
-                first_name TEXT,
-                last_name TEXT,
-                phone TEXT,
-                balance REAL DEFAULT 0,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_activity TIMESTAMP
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS cart (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                product_id INTEGER,
-                quantity INTEGER DEFAULT 1,
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (user_id) REFERENCES users(user_id),
-                FOREIGN KEY (product_id) REFERENCES products(id)
-            )
-        """)
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                order_number TEXT UNIQUE,
-                user_id INTEGER,
-                items TEXT,
-                total REAL,
-                status TEXT DEFAULT 'pending',
-                payment_method TEXT,
-                payment_id TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP
-            )
-        """)
+        c.execute("""CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            price REAL NOT NULL,
+            category TEXT,
+            image_url TEXT,
+            stock INTEGER DEFAULT 999,
+            is_digital BOOLEAN DEFAULT 0,
+            digital_content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE,
+            emoji TEXT,
+            sort_order INTEGER DEFAULT 0
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT,
+            first_name TEXT,
+            last_name TEXT,
+            phone TEXT,
+            balance REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS cart (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            product_id INTEGER,
+            quantity INTEGER DEFAULT 1,
+            added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS orders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_number TEXT UNIQUE,
+            user_id INTEGER,
+            items TEXT,
+            total REAL,
+            status TEXT DEFAULT 'pending',
+            payment_method TEXT,
+            payment_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP
+        )""")
         conn.commit()
         conn.close()
         logger.info("База данных инициализирована")
@@ -99,7 +99,6 @@ class Database:
     def get_connection(self):
         return sqlite3.connect(self.db_path)
     
-    # ===== КАТЕГОРИИ =====
     def add_category(self, name, emoji="📦", sort_order=0):
         conn = self.get_connection()
         c = conn.cursor()
@@ -116,7 +115,6 @@ class Database:
         conn.close()
         return categories
     
-    # ===== ТОВАРЫ =====
     def add_product(self, name, description, price, category=None, image_url=None, stock=999, is_digital=False, digital_content=None):
         conn = self.get_connection()
         c = conn.cursor()
@@ -164,7 +162,6 @@ class Database:
         conn.commit()
         conn.close()
     
-    # ===== ПОЛЬЗОВАТЕЛИ =====
     def register_user(self, user_id, username=None, first_name=None, last_name=None):
         conn = self.get_connection()
         c = conn.cursor()
@@ -173,19 +170,6 @@ class Database:
         conn.commit()
         conn.close()
     
-    def get_user(self, user_id):
-        conn = self.get_connection()
-        c = conn.cursor()
-        c.execute("SELECT * FROM users WHERE user_id = ?", (user_id,))
-        row = c.fetchone()
-        conn.close()
-        if row:
-            return {"user_id": row[0], "username": row[1], "first_name": row[2], 
-                    "last_name": row[3], "phone": row[4], "balance": row[5], 
-                    "created_at": row[6], "last_activity": row[7]}
-        return None
-    
-    # ===== КОРЗИНА =====
     def add_to_cart(self, user_id, product_id, quantity=1):
         conn = self.get_connection()
         c = conn.cursor()
@@ -231,7 +215,6 @@ class Database:
         cart = self.get_cart(user_id)
         return sum(item["price"] * item["quantity"] for item in cart)
     
-    # ===== ЗАКАЗЫ =====
     def create_order(self, user_id, items, total, payment_method, payment_id=None):
         conn = self.get_connection()
         c = conn.cursor()
@@ -268,7 +251,6 @@ class Database:
         conn.close()
         return orders
     
-    # ===== СТАТИСТИКА =====
     def get_stats(self):
         conn = self.get_connection()
         c = conn.cursor()
@@ -296,15 +278,16 @@ db = Database()
 
 # Добавляем категории
 db.add_category("CEF Сборки", "💻")
-db.add_category("Редакт сборок", "👕")
-db.add_category("Дополнительные товары", "🎮")
-db.add_category("Услуги", "⚡")
+db.add_category("Услуги", "💻")
+db.add_category("Установка доп возможностей", "💻")
+db.add_category("GUI", "💻")
 
 # Добавляем тестовые товары
 if not db.get_products():
-    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite колекции", 149.99, "CEF Сборки", None, 959)
-    db.add_product("CEF Сборка Pro", "Качественная сборка для тех кто любит комфорт", 399.99, "Одежда", None, 1632)
-    db.add_product("CEF Сборка Vip", "Полная подписка на лучшую версию сборок", 899.99, "Цифровые товары", None, 4328, True, "https://example.com/course.zip")
+    db.add_product("CEF Сборка Pro", "Максимальная производительность для киберспорта", 799.50, "CEF Сборки", None, 999)
+    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite коллекции", 199.72, "CEF Сборки", None, 999)
+    db.add_product("CEF Сборка Mid", "Средний уровень для комфортной игры", 425.47, "CEF Сборки", None, 999)
+    db.add_product("CEF Сборка Ultra", "Ультимативная сборка для профессионалов", 1025.28, "CEF Сборки", None, 999)
 
 # ========== БОТ ==========
 
@@ -331,7 +314,7 @@ class SalesBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         self.db.register_user(user.id, user.username, user.first_name, user.last_name)
-        text = f"🛍️ *Добро пожаловать в магазин!*\n\nМы рады видеть тебя, {user.first_name}! 👋\n\nЧто тебя интересует?"
+        text = f"🛍️ *Добро пожаловать в магазин CEF сборок!*\n\nМы рады видеть тебя, {user.first_name}! 👋\n\nЧто тебя интересует?"
         keyboard = [
             [InlineKeyboardButton("📦 Каталог", callback_data="catalog")],
             [InlineKeyboardButton("🛒 Корзина", callback_data="view_cart")],
@@ -366,7 +349,7 @@ class SalesBot:
             keyboard.append([InlineKeyboardButton(f"{cat['emoji']} {cat['name']}", callback_data=f"category_{cat['name']}")])
         keyboard.append([InlineKeyboardButton("🔄 Все товары", callback_data="category_all")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
-        text = "📦 *Каталог*\n\nВыбери категорию:"
+        text = "📦 *Каталог CEF сборок*\n\nВыбери категорию:"
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
@@ -384,7 +367,7 @@ class SalesBot:
         else:
             text = "📋 *Ваши заказы:*\n\n"
             for order in orders[:5]:
-                text += f"📦 #{order['order_number']}\n💰 {order['total']:.2f} $\n📊 Статус: {order['status']}\n📅 {order['created_at'][:10]}\n\n"
+                text += f"📦 #{order['order_number']}\n💰 {order['total']:.2f} {CURRENCY_SYMBOL}\n📊 Статус: {order['status']}\n📅 {order['created_at'][:10]}\n\n"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
@@ -394,7 +377,7 @@ class SalesBot:
         if not user:
             await update.message.reply_text("❌ Пользователь не найден")
             return
-        text = f"👤 *Профиль*\n\n• ID: `{user['user_id']}`\n• Имя: {user['first_name'] or 'Не указано'}\n• Username: @{user['username'] or 'Не указан'}\n• Баланс: {user['balance']:.2f} $\n• Дата: {user['created_at'][:10]}"
+        text = f"👤 *Профиль*\n\n• ID: `{user['user_id']}`\n• Имя: {user['first_name'] or 'Не указано'}\n• Username: @{user['username'] or 'Не указан'}\n• Баланс: {user['balance']:.2f} {CURRENCY_SYMBOL}\n• Дата: {user['created_at'][:10]}"
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
@@ -408,6 +391,7 @@ class SalesBot:
             [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
             [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
             [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
+            [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
             [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
         ]
@@ -423,7 +407,7 @@ class SalesBot:
         text = "📦 *Товары:*\n\n"
         keyboard = []
         for p in products:
-            text += f"🔹 *{p['name']}* — {p['price']:.2f} $\n"
+            text += f"🔹 *{p['name']}* — {p['price']:.2f} {CURRENCY_SYMBOL}\n"
             keyboard.append([InlineKeyboardButton(f"👉 {p['name']}", callback_data=f"product_{p['id']}")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="catalog")])
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -433,10 +417,10 @@ class SalesBot:
         if not product:
             await update.callback_query.edit_message_text("❌ Товар не найден")
             return
-        text = f"🛍️ *{product['name']}*\n\n📝 {product['description']}\n💰 *Цена:* {product['price']:.2f} $\n📦 *В наличии:* {product['stock']} шт."
+        text = f"🛍️ *{product['name']}*\n\n📝 {product['description']}\n💰 *Цена:* {product['price']:.2f} {CURRENCY_SYMBOL}\n📦 *В наличии:* {product['stock']} шт."
         keyboard = [
             [InlineKeyboardButton("🛒 Добавить в корзину", callback_data=f"add_to_cart_{product_id}")],
-            [InlineKeyboardButton("🗑 Удалить товар", callback_data=f"admin_delete_product_{product_id}")],
+            [InlineKeyboardButton("🗑 Удалить товар (админ)", callback_data=f"admin_delete_product_{product_id}")],
             [InlineKeyboardButton("🔙 Назад", callback_data=f"category_{product['category'] or 'all'}")]
         ]
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -457,9 +441,9 @@ class SalesBot:
         for item in cart:
             subtotal = item["price"] * item["quantity"]
             total += subtotal
-            text += f"• {item['name']} × {item['quantity']} = {subtotal:.2f} $\n"
+            text += f"• {item['name']} × {item['quantity']} = {subtotal:.2f} {CURRENCY_SYMBOL}\n"
             keyboard.append([InlineKeyboardButton(f"❌ Убрать {item['name']}", callback_data=f"remove_from_cart_{item['product_id']}")])
-        text += f"\n💰 *Итого:* {total:.2f} $"
+        text += f"\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL}"
         keyboard.append([InlineKeyboardButton("🔄 Очистить", callback_data="clear_cart")])
         keyboard.append([InlineKeyboardButton("💳 Оплатить", callback_data="checkout")])
         keyboard.append([InlineKeyboardButton("🔙 В каталог", callback_data="catalog")])
@@ -509,9 +493,10 @@ class SalesBot:
                 await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
                 return
             total = self.db.get_cart_total(user_id)
-            text = f"💳 *Оформление заказа*\n\n💰 *Итого:* {total:.2f} $\n\nВыбери способ оплаты:"
+            text = f"💳 *Оформление заказа*\n\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL}\n\nВыбери способ оплаты:"
             keyboard = [
                 [InlineKeyboardButton("💳 FreeKassa", callback_data="pay_freekassa")],
+                [InlineKeyboardButton("💳 Оплатить по реквизитам", callback_data="pay_manual")],
                 [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
             ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -523,17 +508,65 @@ class SalesBot:
                 return
             total = self.db.get_cart_total(user_id)
             order_id, order_number = self.db.create_order(user_id, cart, total, "freekassa")
-            
-            sign = hashlib.md5(f"{FREAKASSA_MERCHANT_ID}:{total:.2f}:{FREAKASSA_SECRET_KEY}:{order_id}".encode()).hexdigest()
-            payment_url = f"https://pay.freekassa.ru/?m={FREAKASSA_MERCHANT_ID}&oa={total:.2f}&o={order_id}&s={sign}"
-            
+            total_formatted = f"{total:.2f}"
+            sign = hashlib.md5(f"{FREAKASSA_MERCHANT_ID}:{total_formatted}:{FREAKASSA_SECRET_KEY}:{order_id}".encode()).hexdigest()
+            payment_url = f"https://pay.freekassa.ru/?m={FREAKASSA_MERCHANT_ID}&oa={total_formatted}&o={order_id}&s={sign}"
             await query.edit_message_text(
-                f"💳 *Оплата через FreeKassa*\n\n📦 Заказ: #{order_number}\n💰 Сумма: {total:.2f} $\n\n🔗 Нажми на кнопку для оплаты:",
+                f"💳 *Оплата через FreeKassa*\n\n📦 Заказ: #{order_number}\n💰 Сумма: {total_formatted} {CURRENCY_SYMBOL}\n\n🔗 Нажми на кнопку для оплаты:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Перейти к оплате", url=payment_url)],
                     [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_order_{order_id}")],
                     [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
                 ]),
+                parse_mode="Markdown"
+            )
+        
+        elif data == "pay_manual":
+            cart = self.db.get_cart(user_id)
+            if not cart:
+                await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
+                return
+            total = self.db.get_cart_total(user_id)
+            order_id, order_number = self.db.create_order(user_id, cart, total, "manual")
+            await query.edit_message_text(
+                f"💳 *Оплата по реквизитам*\n\n"
+                f"📦 Заказ: #{order_number}\n"
+                f"💰 Сумма: {total:.2f} {CURRENCY_SYMBOL}\n\n"
+                f"💳 *Реквизиты для оплаты:*\n"
+                f"• Карта: `1234 5678 9012 3456`\n"
+                f"• Получатель: Иванов И.И.\n"
+                f"• Банк: Т-Банк\n\n"
+                f"📌 *В назначении платежа укажи:* `Заказ #{order_number}`\n\n"
+                f"⏳ После оплаты нажми «✅ Я оплатил» и администратор подтвердит заказ.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✅ Я оплатил", callback_data=f"manual_paid_{order_id}")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
+                ]),
+                parse_mode="Markdown"
+            )
+        
+        elif data.startswith("manual_paid_"):
+            order_id = int(data.replace("manual_paid_", ""))
+            # Отправляем уведомление админу
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"💰 *Новый запрос на подтверждение оплаты!*\n\n"
+                             f"📦 Заказ: #{order_id}\n"
+                             f"👤 Пользователь: {user_id}\n"
+                             f"⏳ Ждёт подтверждения.\n\n"
+                             f"Используй кнопку в админ-панели для подтверждения.",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+            
+            await query.edit_message_text(
+                f"✅ *Заявка на оплату отправлена!*\n\n"
+                f"📦 Заказ: #{order_id}\n"
+                f"⏳ Администратор проверит оплату и подтвердит заказ.\n\n"
+                f"Спасибо за ожидание! 🙏",
                 parse_mode="Markdown"
             )
         
@@ -546,10 +579,11 @@ class SalesBot:
             conn.close()
             if row and row[0] == "paid":
                 await query.edit_message_text("✅ *Заказ оплачен!*\n\nСпасибо за покупку! 🎉", parse_mode="Markdown")
+            elif row and row[0] == "pending":
+                await query.edit_message_text("⏳ *Заказ ожидает подтверждения оплаты*\n\nАдминистратор проверит оплату в ближайшее время.", parse_mode="Markdown")
             else:
                 await query.edit_message_text("⏳ *Заказ ещё не оплачен*\n\nПожалуйста, завершите оплату или проверьте позже.", parse_mode="Markdown")
         
-        # ===== АДМИНКА =====
         elif data == "admin":
             await self.admin_command(update, context)
         
@@ -560,7 +594,7 @@ class SalesBot:
             else:
                 text = "📦 *Товары:*\n\n"
                 for p in products[:20]:
-                    text += f"• {p['name']} — {p['price']:.2f} $ (в наличии: {p['stock']})\n"
+                    text += f"• {p['name']} — {p['price']:.2f} {CURRENCY_SYMBOL} (в наличии: {p['stock']})\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         
@@ -571,7 +605,7 @@ class SalesBot:
                 "Отправь данные в формате:\n"
                 "`Название | Описание | Цена | Категория | Количество`\n\n"
                 "Пример:\n"
-                "`Наушники | Беспроводные наушники | 199.99 | Электроника | 30`\n\n"
+                "`CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999`\n\n"
                 "Для отмены отправь /cancel",
                 parse_mode="Markdown"
             )
@@ -595,16 +629,62 @@ class SalesBot:
             else:
                 text = "📋 *Последние заказы:*\n\n"
                 for order in orders[:10]:
-                    text += f"📦 #{order['order_number']} — {order['total']:.2f} $ — {order['status']}\n"
+                    text += f"📦 #{order['order_number']} — {order['total']:.2f} {CURRENCY_SYMBOL} — {order['status']}\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
+        elif data == "admin_confirm_payment":
+            orders = self.db.get_orders()
+            pending_orders = [o for o in orders if o["status"] == "pending"]
+            if not pending_orders:
+                await query.edit_message_text("📋 *Нет заказов, ожидающих подтверждения*", parse_mode="Markdown")
+                return
+            
+            text = "💳 *Заказы на подтверждение:*\n\n"
+            keyboard = []
+            for order in pending_orders[:10]:
+                text += f"📦 #{order['order_number']} — {order['total']:.2f} {CURRENCY_SYMBOL}\n"
+                keyboard.append([InlineKeyboardButton(
+                    f"✅ Подтвердить #{order['order_number']}",
+                    callback_data=f"admin_confirm_{order['id']}"
+                )])
+            
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin")])
+            await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
+        elif data.startswith("admin_confirm_"):
+            if user_id not in ADMIN_IDS:
+                await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
+                return
+            order_id = int(data.replace("admin_confirm_", ""))
+            self.db.update_order_status(order_id, "paid")
+            
+            # Получаем пользователя
+            conn = sqlite3.connect("sales_bot.db")
+            c = conn.cursor()
+            c.execute("SELECT user_id FROM orders WHERE id = ?", (order_id,))
+            row = c.fetchone()
+            conn.close()
+            
+            if row:
+                user_id = row[0]
+                try:
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=f"✅ *Ваш заказ #{order_id} подтверждён и оплачен!*\n\nСпасибо за покупку! 🎉",
+                        parse_mode="Markdown"
+                    )
+                except:
+                    pass
+            
+            await query.edit_message_text(f"✅ *Заказ #{order_id} подтверждён!*", parse_mode="Markdown")
         
         elif data == "admin_stats":
             stats = self.db.get_stats()
             text = f"📊 *Статистика*\n\n"
             text += f"👥 Пользователей: {stats['total_users']}\n"
             text += f"📦 Заказов: {stats['total_orders']}\n"
-            text += f"💰 Выручка: {stats['total_revenue']:.2f} $\n"
+            text += f"💰 Выручка: {stats['total_revenue']:.2f} {CURRENCY_SYMBOL}\n"
             text += f"📅 Заказов сегодня: {stats['today_orders']}\n"
             text += f"📦 Товаров в наличии: {stats['in_stock']}"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
@@ -614,7 +694,6 @@ class SalesBot:
         user_id = update.effective_user.id
         text = update.message.text
         
-        # Режим добавления товара (админ)
         if context.user_data.get("admin_mode") == "add_product":
             if user_id not in ADMIN_IDS:
                 await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -632,7 +711,7 @@ class SalesBot:
                     "❌ *Неверный формат*\n\n"
                     "Нужно: `Название | Описание | Цена | Категория | Количество`\n\n"
                     "Пример:\n"
-                    "`Наушники | Беспроводные наушники | 199.99 | Электроника | 30`",
+                    "`CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999`",
                     parse_mode="Markdown"
                 )
                 return
@@ -650,7 +729,7 @@ class SalesBot:
                 await update.message.reply_text(
                     f"✅ *Товар добавлен!*\n\n"
                     f"📦 {name}\n"
-                    f"💰 {price:.2f} $\n"
+                    f"💰 {price:.2f} {CURRENCY_SYMBOL}\n"
                     f"📂 {category}\n"
                     f"📊 В наличии: {stock}\n"
                     f"🆔 ID: {product_id}",
@@ -660,7 +739,6 @@ class SalesBot:
                 await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
             return
         
-        # Обычные сообщения
         await update.message.reply_text("❓ Используй кнопки или команды: /start, /catalog, /help")
 
 # ========== ЗАПУСК ==========
