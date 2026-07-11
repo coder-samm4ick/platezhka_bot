@@ -672,7 +672,7 @@ class SalesBot:
         await query.answer()
         data = query.data
         user_id = query.from_user.id
-        
+
         if data == "back_to_menu":
             await self.start_command(update, context)
         elif data == "catalog":
@@ -733,7 +733,7 @@ class SalesBot:
                 [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
             ]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        
+
         elif data == "pay_freekassa":
             cart = self.db.get_cart(user_id)
             if not cart:
@@ -764,7 +764,7 @@ class SalesBot:
                 ]),
                 parse_mode="Markdown"
             )
-        
+
         elif data == "pay_manual":
             cart = self.db.get_cart(user_id)
             if not cart:
@@ -799,7 +799,7 @@ class SalesBot:
                 ]),
                 parse_mode="Markdown"
             )
-        
+
         elif data == "pay_cryptobot":
             cart = self.db.get_cart(user_id)
             if not cart:
@@ -824,7 +824,7 @@ class SalesBot:
                 ]),
                 parse_mode="Markdown"
             )
-        
+
         elif data.startswith("manual_paid_"):
             order_id = int(data.replace("manual_paid_", ""))
             for admin_id in ADMIN_IDS:
@@ -843,7 +843,7 @@ class SalesBot:
                 f"Спасибо за ожидание! 🙏",
                 parse_mode="Markdown"
             )
-        
+
         elif data.startswith("check_order_"):
             order_id = int(data.replace("check_order_", ""))
             order = self.db.get_order(order_id)
@@ -856,10 +856,10 @@ class SalesBot:
                 await query.edit_message_text("⏳ *Заказ ожидает подтверждения оплаты*\n\nАдминистратор проверит оплату в ближайшее время.", parse_mode="Markdown")
             else:
                 await query.edit_message_text(f"📊 *Статус заказа:* {order['status']}", parse_mode="Markdown")
-        
+
         elif data == "admin":
             await self.admin_command(update, context)
-        
+
         elif data == "admin_products":
             products = self.db.get_products(limit=100)
             if not products:
@@ -872,8 +872,8 @@ class SalesBot:
                     text += f"• {digital}{p['name']} — {p['price']:.2f} {CURRENCY_SYMBOL} (~{usdt_price:.2f} USDT) (в наличии: {p['stock']})\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        
-                elif data == "admin_add_product":
+
+        elif data == "admin_add_product":
             context.user_data["admin_mode"] = "add_product"
             await query.edit_message_text(
                 "📝 *Добавление товара*\n\n"
@@ -898,7 +898,7 @@ class SalesBot:
                 "Для отмены отправь /cancel",
                 parse_mode="Markdown"
             )
-        
+
         elif data.startswith("admin_delete_product_"):
             if user_id not in ADMIN_IDS:
                 await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -910,7 +910,7 @@ class SalesBot:
                 await query.edit_message_text(f"✅ *Товар удалён:* {product['name']}", parse_mode="Markdown")
             else:
                 await query.edit_message_text("❌ *Товар не найден*", parse_mode="Markdown")
-        
+
         elif data == "admin_orders":
             orders = self.db.get_orders()
             if not orders:
@@ -922,7 +922,7 @@ class SalesBot:
                     text += f"📦 #{order['order_number']} — {order['total']:.2f} {CURRENCY_SYMBOL} — {status_emoji} {order['status']}\n"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        
+
         elif data == "admin_confirm_payment":
             pending_orders = self.db.get_pending_orders()
             if not pending_orders:
@@ -938,7 +938,7 @@ class SalesBot:
                 )])
             keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="admin")])
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-        
+
         elif data.startswith("admin_confirm_"):
             if user_id not in ADMIN_IDS:
                 await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -970,7 +970,7 @@ class SalesBot:
                 logger.error(f"Ошибка уведомления пользователя: {e}")
             await query.edit_message_text(f"✅ *Заказ #{order['order_number']} подтверждён!*\n\n💎 Начислено бонусов: {bonus_points}", parse_mode="Markdown")
             await self.admin_command(update, context)
-        
+
         elif data == "admin_stats":
             stats = self.db.get_stats()
             text = f"📊 *Статистика*\n\n"
