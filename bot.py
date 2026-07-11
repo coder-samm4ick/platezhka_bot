@@ -562,23 +562,32 @@ class SalesBot:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        if user_id not in ADMIN_IDS:
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_IDS:
+        if update.message:
             await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
-            return
-        pending = self.db.get_pending_orders()
-        pending_count = len(pending)
-        text = f"👑 *Админ-панель*\n\n📌 Управление:\n⏳ Заказов на подтверждение: {pending_count}"
-        keyboard = [
-            [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
-            [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
-            [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
-            [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
-            [InlineKeyboardButton("🎁 Добавить промокод", callback_data="admin_add_promocode")],
-            [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
-        ]
+        else:
+            await update.callback_query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
+        return
+
+    pending = self.db.get_pending_orders()
+    pending_count = len(pending)
+    text = f"👑 *Админ-панель*\n\n📌 Управление:\n⏳ Заказов на подтверждение: {pending_count}"
+    
+    keyboard = [
+        [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
+        [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
+        [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
+        [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
+        [InlineKeyboardButton("🎁 Добавить промокод", callback_data="admin_add_promocode")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+    ]
+    
+    if update.message:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     # ========== ПОКАЗ ТОВАРОВ ==========
     
