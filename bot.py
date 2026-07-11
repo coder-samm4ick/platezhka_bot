@@ -873,7 +873,7 @@ class SalesBot:
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         
-        elif data == "admin_add_product":
+                elif data == "admin_add_product":
             context.user_data["admin_mode"] = "add_product"
             await query.edit_message_text(
                 "📝 *Добавление товара*\n\n"
@@ -886,7 +886,7 @@ class SalesBot:
                 "Для отмены отправь /cancel",
                 parse_mode="Markdown"
             )
-        
+
         elif data == "admin_add_promocode":
             context.user_data["admin_mode"] = "add_promocode"
             await query.edit_message_text(
