@@ -434,7 +434,6 @@ class SalesBot:
     def start(self):
         self.application = Application.builder().token(self.token).build()
         
-        # Команды
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("help", self.help_command))
         self.application.add_handler(CommandHandler("catalog", self.catalog_command))
@@ -445,13 +444,9 @@ class SalesBot:
         self.application.add_handler(CommandHandler("cancel", self.cancel_command))
         self.application.add_handler(CommandHandler("update_currency", self.update_currency_command))
         
-        # Callback'и
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
-        
-        # Сообщения
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
-        # Запускаем автообновление курса в отдельном потоке
         self.start_currency_updater()
         
         logger.info("🚀 Бот запущен!")
@@ -463,7 +458,6 @@ class SalesBot:
                 time.sleep(CURRENCY_UPDATE_INTERVAL)
                 self.currency.update_rates()
                 logger.info("🔄 Автообновление курса выполнено")
-        
         thread = threading.Thread(target=update_loop, daemon=True)
         thread.start()
     
@@ -481,8 +475,6 @@ class SalesBot:
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
         await update.message.reply_text("✅ *Действие отменено*", parse_mode="Markdown")
-    
-    # ========== КОМАНДЫ ==========
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -562,34 +554,32 @@ class SalesBot:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     async def admin_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id not in ADMIN_IDS:
-        if update.message:
-            await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
-        else:
-            await update.callback_query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
-        return
+        user_id = update.effective_user.id
+        if user_id not in ADMIN_IDS:
+            if update.message:
+                await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
+            else:
+                await update.callback_query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
+            return
 
-    pending = self.db.get_pending_orders()
-    pending_count = len(pending)
-    text = f"👑 *Админ-панель*\n\n📌 Управление:\n⏳ Заказов на подтверждение: {pending_count}"
-    
-    keyboard = [
-        [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
-        [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
-        [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
-        [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
-        [InlineKeyboardButton("🎁 Добавить промокод", callback_data="admin_add_promocode")],
-        [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
-    ]
-    
-    if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    else:
-        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    
-    # ========== ПОКАЗ ТОВАРОВ ==========
+        pending = self.db.get_pending_orders()
+        pending_count = len(pending)
+        text = f"👑 *Админ-панель*\n\n📌 Управление:\n⏳ Заказов на подтверждение: {pending_count}"
+        
+        keyboard = [
+            [InlineKeyboardButton("📦 Товары", callback_data="admin_products")],
+            [InlineKeyboardButton("➕ Добавить товар", callback_data="admin_add_product")],
+            [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
+            [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
+            [InlineKeyboardButton("🎁 Добавить промокод", callback_data="admin_add_promocode")],
+            [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
+            [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
+        ]
+        
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     async def show_products(self, update: Update, category=None):
         products = self.db.get_products(category)
@@ -659,8 +649,6 @@ class SalesBot:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
-    
-    # ========== ОБРАБОТКА КНОПОК ==========
     
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -977,13 +965,10 @@ class SalesBot:
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
-    # ========== ОБРАБОТКА СООБЩЕНИЙ ==========
-    
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         text = update.message.text
         
-        # === РЕЖИМ ДОБАВЛЕНИЯ ТОВАРА ===
         if context.user_data.get("admin_mode") == "add_product":
             if user_id not in ADMIN_IDS:
                 await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -1032,7 +1017,6 @@ class SalesBot:
                 await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
             return
         
-        # === РЕЖИМ ДОБАВЛЕНИЯ ПРОМОКОДА ===
         if context.user_data.get("admin_mode") == "add_promocode":
             if user_id not in ADMIN_IDS:
                 await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -1069,7 +1053,6 @@ class SalesBot:
                 await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
             return
         
-        # === ВВОД ПРОМОКОДА ===
         if context.user_data.get("awaiting_promocode"):
             code = text.strip().upper()
             result = self.db.apply_promocode(code)
@@ -1088,7 +1071,6 @@ class SalesBot:
                 await update.message.reply_text(f"❌ {result['error']}", parse_mode="Markdown")
             return
         
-        # === ОБЫЧНОЕ СООБЩЕНИЕ ===
         await update.message.reply_text("❓ Используй кнопки или команды: /start, /catalog, /help")
 
 # ========== ЗАПУСК ==========
