@@ -400,14 +400,18 @@ db = Database()
 
 # Добавляем категории
 db.add_category("CEF Сборки", "💻")
+db.add_category("GUI ", "💻")
+db.add_category("ENB", "💻")
+db.add_category("Услуги", "💻")
+db.add_category("Другое", "💻")
 
 # Добавляем тестовые товары
 if not db.get_products():
-    db.add_product("CEF Сборка Pro", "Максимальная производительность для киберспорта", 4999, "CEF Сборки", None, 999)
-    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite коллекции", 1499, "CEF Сборки", None, 999)
-    db.add_product("CEF Сборка Mid", "Средний уровень для комфортной игры", 2999, "CEF Сборки", None, 999)
-    db.add_product("CEF Сборка Ultra", "Ультимативная сборка для профессионалов", 9999, "CEF Сборки", None, 999)
-    db.add_product("Курс по CEF", "Полный гайд по настройке CEF сборок", 999, "CEF Сборки", None, 999, True, "https://example.com/cef-course.zip")
+    db.add_product("CEF Сборка Pro", "Максимальная производительность для киберспорта", 499.99, "CEF Сборки", None, 999, True, https://disk.yandex.by/d/vh2uOW6df9BPQQ)
+    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite коллекции", 199.53, "CEF Сборки", None, 999, True, https://disk.yandex.by/d/vh2uOW6df9BPQQ)
+    db.add_product("CEF Сборка Mid", "Средний уровень для комфортной игры", 320.78, "CEF Сборки", None, 999, True, https://disk.yandex.by/d/vh2uOW6df9BPQQ)
+    db.add_product("CEF Сборка Ultra", "Ультимативная сборка для профессионалов", 820.99, "CEF Сборки", None, 999, True, https://disk.yandex.by/d/vh2uOW6df9BPQQ)
+    db.add_product("Курс по CEF", "Полный гайд по настройке CEF сборок", 389, "CEF Сборки", None, 999, True, "https://disk.yandex.by/d/vh2uOW6df9BPQQ")
 
 # Добавляем тестовые промокоды
 db.add_promocode("WELCOME10", 10, None, 50)
