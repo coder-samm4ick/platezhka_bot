@@ -302,9 +302,9 @@ db.add_category("Услуги", "⚡")
 
 # Добавляем тестовые товары
 if not db.get_products():
-    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite колекции", 149.99, "CEF Сборки", None, ∞)
-    db.add_product("CEF Сборка Pro", "Качественная сборка для тех кто любит комфорт", 399.99, "Одежда", None, ∞)
-    db.add_product("CEF Сборка Vip", "Полная подписка на лучшую версию сборок", 899.99, "Цифровые товары", None, ∞, True, "https://example.com/course.zip")
+    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite колекции", 149.99, "CEF Сборки", None, 959)
+    db.add_product("CEF Сборка Pro", "Качественная сборка для тех кто любит комфорт", 399.99, "Одежда", None, 1632)
+    db.add_product("CEF Сборка Vip", "Полная подписка на лучшую версию сборок", 899.99, "Цифровые товары", None, 4328, True, "https://example.com/course.zip")
 
 # ========== БОТ ==========
 
