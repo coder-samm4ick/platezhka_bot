@@ -6,7 +6,8 @@ import json
 import sqlite3
 import logging
 import hashlib
-import asyncio
+import threading
+import time
 import requests
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -490,21 +491,23 @@ class SalesBot:
         # Сообщения
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
-        # Запускаем автообновление курса
+        # Запускаем автообновление курса в отдельном потоке
         self.start_currency_updater()
         
         logger.info("🚀 Бот запущен!")
         self.application.run_polling()
     
     def start_currency_updater(self):
-        """Запуск периодического обновления курса раз в час"""
-        async def update_loop():
+        """Запуск периодического обновления курса в отдельном потоке (без asyncio)"""
+        def update_loop():
             while True:
-                await asyncio.sleep(CURRENCY_UPDATE_INTERVAL)
+                time.sleep(CURRENCY_UPDATE_INTERVAL)
                 self.currency.update_rates()
                 logger.info("🔄 Автообновление курса выполнено")
         
-        asyncio.create_task(update_loop())
+        # Запускаем поток-демон
+        thread = threading.Thread(target=update_loop, daemon=True)
+        thread.start()
     
     async def update_currency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -852,9 +855,9 @@ class SalesBot:
                 f"📦 Заказ: #{order_number}\n"
                 f"💰 Сумма: {final_total:.2f} {CURRENCY_SYMBOL}\n\n"
                 f"💳 *Реквизиты для оплаты:*\n"
-                f"• Карта: `1234 5678 9012 3456`\n"
-                f"• Получатель: Иванов И.И.\n"
-                f"• Банк: Т-Банк\n\n"
+                f"• Карта: `5208 1300 1478 8552`\n"
+                f"• Получатель: Радабольский С.Н.\n"
+                f"• Банк: Альфа-Банк\n\n"
                 f"📌 *В назначении платежа укажи:* `Заказ #{order_number}`\n\n"
                 f"⏳ После оплаты нажми «✅ Я оплатил» и администратор подтвердит заказ.",
                 reply_markup=InlineKeyboardMarkup([
