@@ -876,27 +876,25 @@ class SalesBot:
         elif data == "admin_add_product":
             context.user_data["admin_mode"] = "add_product"
             await query.edit_message_text(
-                "📝 *Добавление товара*\n\n"
+                "📝 Добавление товара\n\n"
                 "Отправь данные в формате:\n"
-                "`Название | Описание | Цена | Категория | Количество | is_digital | ссылка`\n\n"
+                "Название | Описание | Цена | Категория | Количество | is_digital | ссылка\n\n"
                 "Примеры:\n"
-                "`CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999`\n"
-                "`Курс по CEF | Полный гайд | 999 | CEF Сборки | 999 | True | https://example.com/file.zip`\n\n"
+                "CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999\n"
+                "Курс по CEF | Полный гайд | 999 | CEF Сборки | 999 | True | https://example.com/file.zip\n\n"
                 "Для цифровых товаров: is_digital = True, ссылка на файл\n"
-                "Для отмены отправь /cancel",
-                parse_mode="Markdown"
+                "Для отмены отправь /cancel"
             )
 
         elif data == "admin_add_promocode":
             context.user_data["admin_mode"] = "add_promocode"
             await query.edit_message_text(
-                "🎁 *Добавление промокода*\n\n"
+                "🎁 Добавление промокода\n\n"
                 "Отправь данные в формате:\n"
-                "`КОД | СКИДКА% | МАКС_ИСПОЛЬЗОВАНИЙ`\n\n"
+                "КОД | СКИДКА% | МАКС_ИСПОЛЬЗОВАНИЙ\n\n"
                 "Пример:\n"
-                "`WELCOME10 | 10 | 50`\n\n"
-                "Для отмены отправь /cancel",
-                parse_mode="Markdown"
+                "WELCOME10 | 10 | 50\n\n"
+                "Для отмены отправь /cancel"
             )
 
         elif data.startswith("admin_delete_product_"):
@@ -998,12 +996,10 @@ class SalesBot:
             parts = text.split("|")
             if len(parts) < 5:
                 await update.message.reply_text(
-                    "❌ *Неверный формат*\n\n"
-                    "Нужно: `Название | Описание | Цена | Категория | Количество | is_digital | ссылка`\n\n"
+                    "❌ Неверный формат\n\n"
+                    "Нужно: Название | Описание | Цена | Категория | Количество | is_digital | ссылка\n\n"
                     "Пример:\n"
-                    "`CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999`\n"
-                    "`Курс по CEF | Полный гайд | 999 | CEF Сборки | 999 | True | https://example.com/file.zip`",
-                    parse_mode="Markdown"
+                    "CEF Сборка Pro | Максимальная мощность | 4999 | CEF Сборки | 999"
                 )
                 return
             try:
@@ -1021,17 +1017,16 @@ class SalesBot:
                                                   is_digital=is_digital, digital_content=digital_content)
                 context.user_data["admin_mode"] = None
                 await update.message.reply_text(
-                    f"✅ *Товар добавлен!*\n\n"
+                    f"✅ Товар добавлен!\n\n"
                     f"📦 {name}\n"
                     f"💰 {price:.2f} {CURRENCY_SYMBOL}\n"
                     f"📂 {category}\n"
                     f"📊 В наличии: {stock}\n"
                     f"🖥️ Цифровой: {is_digital}\n"
-                    f"🆔 ID: {product_id}",
-                    parse_mode="Markdown"
+                    f"🆔 ID: {product_id}"
                 )
             except Exception as e:
-                await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
+                await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
         
         if context.user_data.get("admin_mode") == "add_promocode":
@@ -1046,11 +1041,10 @@ class SalesBot:
             parts = text.split("|")
             if len(parts) < 3:
                 await update.message.reply_text(
-                    "❌ *Неверный формат*\n\n"
-                    "Нужно: `КОД | СКИДКА% | МАКС_ИСПОЛЬЗОВАНИЙ`\n\n"
+                    "❌ Неверный формат\n\n"
+                    "Нужно: КОД | СКИДКА% | МАКС_ИСПОЛЬЗОВАНИЙ\n\n"
                     "Пример:\n"
-                    "`WELCOME10 | 10 | 50`",
-                    parse_mode="Markdown"
+                    "WELCOME10 | 10 | 50"
                 )
                 return
             try:
@@ -1060,14 +1054,13 @@ class SalesBot:
                 self.db.add_promocode(code, discount, None, max_uses)
                 context.user_data["admin_mode"] = None
                 await update.message.reply_text(
-                    f"✅ *Промокод добавлен!*\n\n"
-                    f"🎁 Код: `{code}`\n"
+                    f"✅ Промокод добавлен!\n\n"
+                    f"🎁 Код: {code}\n"
                     f"📊 Скидка: {discount}%\n"
-                    f"📊 Макс. использований: {max_uses}",
-                    parse_mode="Markdown"
+                    f"📊 Макс. использований: {max_uses}"
                 )
             except Exception as e:
-                await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
+                await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
         
         if context.user_data.get("awaiting_promocode"):
@@ -1078,14 +1071,13 @@ class SalesBot:
                 context.user_data["promocode_discount"] = discount
                 context.user_data["awaiting_promocode"] = False
                 await update.message.reply_text(
-                    f"✅ *Промокод применён!*\n\n"
+                    f"✅ Промокод применён!\n\n"
                     f"🎁 Скидка: {discount}%\n\n"
-                    f"Перейдите в корзину для оформления заказа.",
-                    parse_mode="Markdown"
+                    f"Перейдите в корзину для оформления заказа."
                 )
                 await self.show_cart(update, user_id, context)
             else:
-                await update.message.reply_text(f"❌ {result['error']}", parse_mode="Markdown")
+                await update.message.reply_text(f"❌ {result['error']}")
             return
         
         await update.message.reply_text("❓ Используй кнопки или команды: /start, /catalog, /help")
