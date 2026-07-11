@@ -295,16 +295,16 @@ class Database:
 db = Database()
 
 # Добавляем категории
-db.add_category("Электроника", "💻")
-db.add_category("Одежда", "👕")
-db.add_category("Цифровые товары", "🎮")
+db.add_category("CEF Сборки", "💻")
+db.add_category("Редакт сборок", "👕")
+db.add_category("Дополнительные товары", "🎮")
 db.add_category("Услуги", "⚡")
 
 # Добавляем тестовые товары
 if not db.get_products():
-    db.add_product("iPhone 15 Pro Max", "Самый мощный смартфон Apple", 1299.99, "Электроника", None, 10)
-    db.add_product("Футболка с принтом", "Качественная футболка", 29.99, "Одежда", None, 50)
-    db.add_product("Курс по Python", "Полный курс Python", 99.99, "Цифровые товары", None, 999, True, "https://example.com/course.zip")
+    db.add_product("CEF Сборка Lite", "Самая лучшая сборка из lite колекции", 149.99, "CEF Сборки", None, ∞)
+    db.add_product("CEF Сборка Pro", "Качественная сборка для тех кто любит комфорт", 399.99, "Одежда", None, ∞)
+    db.add_product("CEF Сборка Vip", "Полная подписка на лучшую версию сборок", 899.99, "Цифровые товары", None, ∞, True, "https://example.com/course.zip")
 
 # ========== БОТ ==========
 
