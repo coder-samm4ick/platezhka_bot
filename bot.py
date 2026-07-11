@@ -449,6 +449,8 @@ class SalesBot:
         
         self.start_currency_updater()
         
+        self.application.add_error_handler(self.error_handler)
+        
         logger.info("🚀 Бот запущен!")
         self.application.run_polling()
     
@@ -460,6 +462,14 @@ class SalesBot:
                 logger.info("🔄 Автообновление курса выполнено")
         thread = threading.Thread(target=update_loop, daemon=True)
         thread.start()
+    
+    async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        logger.error(f"Update {update} caused error {context.error}")
+        try:
+            if update and update.effective_message:
+                await update.effective_message.reply_text("❌ *Произошла ошибка*", parse_mode="Markdown")
+        except:
+            pass
     
     async def update_currency_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -479,7 +489,9 @@ class SalesBot:
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         self.db.register_user(user.id, user.username, user.first_name, user.last_name)
+        
         text = f"🛍️ *Добро пожаловать в магазин CEF сборок!*\n\nМы рады видеть тебя, {user.first_name}! 👋\n\nЧто тебя интересует?"
+        
         keyboard = [
             [InlineKeyboardButton("📦 Каталог", callback_data="catalog")],
             [InlineKeyboardButton("🛒 Корзина", callback_data="view_cart")],
@@ -487,7 +499,11 @@ class SalesBot:
             [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
             [InlineKeyboardButton("❓ Помощь", callback_data="help")]
         ]
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
+        if update.message:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = """
@@ -505,7 +521,7 @@ class SalesBot:
 💎 *Бонусы:* 5% от суммы заказа
 🎁 *Промокоды:* Введите в корзине
 💰 *Курс обновляется автоматически раз в час.*
-        """
+"""
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
@@ -519,6 +535,7 @@ class SalesBot:
             keyboard.append([InlineKeyboardButton(f"{cat['emoji']} {cat['name']}", callback_data=f"category_{cat['name']}")])
         keyboard.append([InlineKeyboardButton("🔄 Все товары", callback_data="category_all")])
         keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
+        
         text = "📦 *Каталог*\n\nВыбери категорию:"
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
