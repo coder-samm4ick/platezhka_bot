@@ -9,7 +9,6 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Подключение к БД
 def get_db():
     conn = sqlite3.connect("sales_bot.db")
     conn.row_factory = sqlite3.Row
@@ -21,12 +20,10 @@ def index():
 
 @app.route('/webhook/payment', methods=['POST'])
 def payment_webhook():
-    """Обработка уведомлений от FreeKassa"""
     try:
         data = request.get_json()
         logger.info(f"✅ Получен вебхук: {json.dumps(data, indent=2, ensure_ascii=False)}")
         
-        # Обновляем статус заказа
         order_id = data.get('order_id')
         if order_id:
             conn = get_db()
