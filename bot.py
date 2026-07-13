@@ -21,7 +21,7 @@ ADMIN_IDS = [8563327706]
 
 # FreeKassa
 FREAKASSA_MERCHANT_ID = "74630"
-FREAKASSA_SECRET_KEY = "adellna"  # ИСПРАВЛЕНО!
+FREAKASSA_SECRET_KEY = "adelina"  # ИСПРАВЛЕНО!
 
 # CryptoBot
 CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
