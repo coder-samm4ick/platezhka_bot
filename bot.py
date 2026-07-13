@@ -27,7 +27,7 @@ CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
 
 # ========== НАСТРОЙКИ ==========
 CURRENCY_SYMBOL = "₽"
-CURRENCY_CODE = "RUB"  # <--- ДОБАВЬ ЭТУ СТРОКУ
+CURRENCY_CODE = "RUB"
 BOT_USERNAME = "platezhka_robot"
 CURRENCY_UPDATE_INTERVAL = 3600
 
@@ -736,54 +736,54 @@ class SalesBot:
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
         elif data == "pay_freekassa":
-    cart = self.db.get_cart(user_id)
-    if not cart:
-        await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
-        return
+            cart = self.db.get_cart(user_id)
+            if not cart:
+                await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
+                return
 
-    total = self.db.get_cart_total(user_id)
-    discount = context.user_data.get("promocode_discount", 0)
-    final_total = total * (1 - discount / 100) if discount > 0 else total
+            total = self.db.get_cart_total(user_id)
+            discount = context.user_data.get("promocode_discount", 0)
+            final_total = total * (1 - discount / 100) if discount > 0 else total
 
-    order_id, order_number = self.db.create_order(user_id, cart, final_total, "freekassa")
+            order_id, order_number = self.db.create_order(user_id, cart, final_total, "freekassa")
 
-    # ========== ИСПРАВЛЕННЫЙ БЛОК ==========
-    merchant_id = FREAKASSA_MERCHANT_ID
-    amount = f"{final_total:.2f}"
-    currency = "RUB"  # <--- ВАЖНО: КОД ВАЛЮТЫ, А НЕ СИМВОЛ
-    secret_key = FREAKASSA_SECRET_KEY
-    order = str(order_id)
+            # ========== ИСПРАВЛЕННЫЙ БЛОК ==========
+            merchant_id = FREAKASSA_MERCHANT_ID
+            amount = f"{final_total:.2f}"
+            currency = "RUB"  # <--- ВАЖНО: КОД ВАЛЮТЫ, А НЕ СИМВОЛ
+            secret_key = FREAKASSA_SECRET_KEY
+            order = str(order_id)
 
-    # ПОДПИСЬ ПО ДОКУМЕНТАЦИИ (с валютой)
-    sign = hashlib.md5(f"{merchant_id}:{amount}:{secret_key}:{currency}:{order}".encode()).hexdigest()
+            # ПОДПИСЬ ПО ДОКУМЕНТАЦИИ (с валютой)
+            sign = hashlib.md5(f"{merchant_id}:{amount}:{secret_key}:{currency}:{order}".encode()).hexdigest()
 
-    # ПРАВИЛЬНЫЙ URL ДЛЯ ОПЛАТЫ
-    payment_url = f"https://pay.fk.money/?m={merchant_id}&oa={amount}&o={order}&s={sign}&currency={currency}"
+            # ПРАВИЛЬНЫЙ URL ДЛЯ ОПЛАТЫ
+            payment_url = f"https://pay.fk.money/?m={merchant_id}&oa={amount}&o={order}&s={sign}&currency={currency}"
 
-    logger.info(f"🔗 Ссылка на оплату: {payment_url}")
+            logger.info(f"🔗 Ссылка на оплату: {payment_url}")
 
-    for admin_id in ADMIN_IDS:
-        try:
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=f"🛒 *НОВЫЙ ЗАКАЗ!*\n\n📦 Заказ: #{order_number}\n👤 Пользователь: {user_id}\n💰 Сумма: {final_total:.2f} ₽\n📊 Статус: ожидает оплаты\n🕐 {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}",
+            for admin_id in ADMIN_IDS:
+                try:
+                    await context.bot.send_message(
+                        chat_id=admin_id,
+                        text=f"🛒 *НОВЫЙ ЗАКАЗ!*\n\n📦 Заказ: #{order_number}\n👤 Пользователь: {user_id}\n💰 Сумма: {final_total:.2f} ₽\n📊 Статус: ожидает оплаты\n🕐 {datetime.now().strftime('%H:%M:%S %d.%m.%Y')}",
+                        parse_mode="Markdown"
+                    )
+                except Exception as e:
+                    logger.error(f"Ошибка уведомления админа: {e}")
+
+            await query.edit_message_text(
+                f"💳 *Оплата через FreeKassa*\n\n"
+                f"📦 Заказ: #{order_number}\n"
+                f"💰 Сумма: {amount} ₽\n\n"
+                f"🔗 Нажми на кнопку для оплаты:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("💳 Перейти к оплате", url=payment_url)],
+                    [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_order_{order_id}")],
+                    [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
+                ]),
                 parse_mode="Markdown"
             )
-        except Exception as e:
-            logger.error(f"Ошибка уведомления админа: {e}")
-
-    await query.edit_message_text(
-        f"💳 *Оплата через FreeKassa*\n\n"
-        f"📦 Заказ: #{order_number}\n"
-        f"💰 Сумма: {amount} ₽\n\n"
-        f"🔗 Нажми на кнопку для оплаты:",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💳 Перейти к оплате", url=payment_url)],
-            [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_order_{order_id}")],
-            [InlineKeyboardButton("🔙 Назад", callback_data="view_cart")]
-        ]),
-        parse_mode="Markdown"
-    )
 
         elif data == "pay_manual":
             cart = self.db.get_cart(user_id)
