@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: amazing-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn webhook_server:app
+    envVars:
+      - key: BOT_TOKEN
+        value: 8896855591:AAF837-w09REedQe2RCSzSJhlhT7BKUrEQ0
+      - key: ADMIN_IDS
+        value: 8563327706
