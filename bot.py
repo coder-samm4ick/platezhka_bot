@@ -27,6 +27,7 @@ CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
 
 # ========== НАСТРОЙКИ ==========
 CURRENCY_SYMBOL = "₽"
+CURRENCY_CODE = "RUB"  # <--- ДОБАВЬ ЭТУ СТРОКУ
 BOT_USERNAME = "platezhka_robot"
 CURRENCY_UPDATE_INTERVAL = 3600
 
