@@ -9,7 +9,8 @@ import hashlib
 import threading
 import time
 import requests
-from datetime import datetime
+import random
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -20,7 +21,7 @@ ADMIN_IDS = [8563327706]
 
 # FreeKassa
 FREAKASSA_MERCHANT_ID = "74630"
-FREAKASSA_SECRET_KEY = "adelina"  # ИСПРАВЛЕНО!
+FREAKASSA_SECRET_KEY = "adelina"
 
 # CryptoBot
 CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
@@ -30,6 +31,15 @@ CURRENCY_SYMBOL = "₽"
 CURRENCY_CODE = "RUB"
 BOT_USERNAME = "platezhka_robot"
 CURRENCY_UPDATE_INTERVAL = 3600
+
+# Бонусы
+BONUS_MIN = 5
+BONUS_MAX = 25
+BONUS_DISCOUNTS = {
+    100: 15,
+    200: 25,
+    500: 50
+}
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -81,6 +91,7 @@ class Database:
         conn = sqlite3.connect(self.db_path)
         c = conn.cursor()
         
+        # Товары
         c.execute("""CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -94,6 +105,7 @@ class Database:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
+        # Категории
         c.execute("""CREATE TABLE IF NOT EXISTS categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT UNIQUE,
@@ -101,6 +113,7 @@ class Database:
             sort_order INTEGER DEFAULT 0
         )""")
         
+        # Пользователи (добавлено bonus_points)
         c.execute("""CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
@@ -112,6 +125,7 @@ class Database:
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
+        # Корзина
         c.execute("""CREATE TABLE IF NOT EXISTS cart (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -120,6 +134,7 @@ class Database:
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
+        # Заказы
         c.execute("""CREATE TABLE IF NOT EXISTS orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             order_number TEXT UNIQUE,
@@ -129,18 +144,33 @@ class Database:
             status TEXT DEFAULT 'pending',
             payment_method TEXT,
             payment_id TEXT,
+            bonus_used INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP
         )""")
         
+        # Промокоды (от бонусов)
+        c.execute("""CREATE TABLE IF NOT EXISTS bonus_promocodes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code TEXT UNIQUE,
+            discount_percent INTEGER,
+            bonus_cost INTEGER,
+            user_id INTEGER,
+            used BOOLEAN DEFAULT 0,
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        
+        # Промокоды (админские)
         c.execute("""CREATE TABLE IF NOT EXISTS promocodes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             code TEXT UNIQUE,
             discount_percent INTEGER,
             active BOOLEAN DEFAULT 1,
-            expires_at TIMESTAMP,
             max_uses INTEGER DEFAULT 1,
-            used_count INTEGER DEFAULT 0
+            used_count INTEGER DEFAULT 0,
+            expires_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
         
         conn.commit()
@@ -150,6 +180,7 @@ class Database:
     def get_connection(self):
         return sqlite3.connect(self.db_path)
     
+    # ===== КАТЕГОРИИ =====
     def add_category(self, name, emoji="📦", sort_order=0):
         conn = self.get_connection()
         c = conn.cursor()
@@ -166,6 +197,7 @@ class Database:
         conn.close()
         return categories
     
+    # ===== ТОВАРЫ =====
     def add_product(self, name, description, price, category=None, image_url=None, stock=999, is_digital=False, digital_content=None):
         conn = self.get_connection()
         c = conn.cursor()
@@ -214,6 +246,7 @@ class Database:
         conn.commit()
         conn.close()
     
+    # ===== ПОЛЬЗОВАТЕЛИ =====
     def register_user(self, user_id, username=None, first_name=None, last_name=None):
         conn = self.get_connection()
         c = conn.cursor()
@@ -234,6 +267,7 @@ class Database:
                     "bonus_points": row[6], "created_at": row[7]}
         return None
     
+    # ===== БОНУСЫ =====
     def add_bonus(self, user_id, points):
         conn = self.get_connection()
         c = conn.cursor()
@@ -249,6 +283,82 @@ class Database:
         conn.close()
         return row[0] if row else 0
     
+    def use_bonus(self, user_id, points):
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("UPDATE users SET bonus_points = bonus_points - ? WHERE user_id = ? AND bonus_points >= ?", 
+                  (points, user_id, points))
+        conn.commit()
+        conn.close()
+        return True
+    
+    def get_bonus_discount(self, points):
+        """Расчёт скидки по бонусам"""
+        if points >= 500:
+            return 50
+        elif points >= 200:
+            return 25
+        elif points >= 100:
+            return 15
+        else:
+            return 0
+    
+    def get_available_bonus_discounts(self, points):
+        """Получить доступные скидки"""
+        available = []
+        for cost, discount in BONUS_DISCOUNTS.items():
+            if points >= cost:
+                available.append({"cost": cost, "discount": discount})
+        return sorted(available, key=lambda x: x["cost"])
+    
+    # ===== БОНУС-ПРОМОКОДЫ =====
+    def create_bonus_promocode(self, user_id, bonus_cost, discount_percent):
+        """Создание промокода за бонусы"""
+        code = f"BONUS{user_id}{int(datetime.now().timestamp())}"[:10].upper()
+        expires_at = (datetime.now() + timedelta(days=30)).isoformat()
+        
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO bonus_promocodes (code, discount_percent, bonus_cost, user_id, expires_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (code, discount_percent, bonus_cost, user_id, expires_at))
+        c.execute("UPDATE users SET bonus_points = bonus_points - ? WHERE user_id = ?", (bonus_cost, user_id))
+        conn.commit()
+        conn.close()
+        return code
+    
+    def get_user_bonus_promocodes(self, user_id):
+        """Получить промокоды пользователя"""
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("""
+            SELECT code, discount_percent, bonus_cost, used, expires_at, created_at
+            FROM bonus_promocodes 
+            WHERE user_id = ? AND used = 0 AND expires_at > datetime('now')
+            ORDER BY created_at DESC
+        """, (user_id,))
+        promocodes = [{"code": row[0], "discount": row[1], "cost": row[2], 
+                       "used": row[3], "expires_at": row[4], "created_at": row[5]} 
+                      for row in c.fetchall()]
+        conn.close()
+        return promocodes
+    
+    def use_bonus_promocode(self, code):
+        """Использовать бонус-промокод"""
+        conn = self.get_connection()
+        c = conn.cursor()
+        c.execute("SELECT discount_percent FROM bonus_promocodes WHERE code = ? AND used = 0 AND expires_at > datetime('now')", (code,))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return None
+        c.execute("UPDATE bonus_promocodes SET used = 1 WHERE code = ?", (code,))
+        conn.commit()
+        conn.close()
+        return row[0]
+    
+    # ===== АДМИН-ПРОМОКОДЫ =====
     def add_promocode(self, code, discount_percent, expires_at=None, max_uses=1):
         conn = self.get_connection()
         c = conn.cursor()
@@ -260,8 +370,10 @@ class Database:
     def apply_promocode(self, code):
         conn = self.get_connection()
         c = conn.cursor()
-        c.execute("SELECT id, discount_percent, max_uses, used_count, expires_at FROM promocodes WHERE code = ? AND active = 1",
-                  (code.upper(),))
+        c.execute("""
+            SELECT id, discount_percent, max_uses, used_count, expires_at
+            FROM promocodes WHERE code = ? AND active = 1
+        """, (code.upper(),))
         row = c.fetchone()
         conn.close()
         if not row:
@@ -278,6 +390,7 @@ class Database:
         conn.close()
         return {"success": True, "discount": discount}
     
+    # ===== КОРЗИНА =====
     def add_to_cart(self, user_id, product_id, quantity=1):
         conn = self.get_connection()
         c = conn.cursor()
@@ -324,13 +437,14 @@ class Database:
         cart = self.get_cart(user_id)
         return sum(item["price"] * item["quantity"] for item in cart)
     
-    def create_order(self, user_id, items, total, payment_method, payment_id=None):
+    # ===== ЗАКАЗЫ =====
+    def create_order(self, user_id, items, total, payment_method, payment_id=None, bonus_used=0):
         conn = self.get_connection()
         c = conn.cursor()
         order_number = f"ORD-{datetime.now().strftime('%Y%m%d')}-{user_id}-{int(datetime.now().timestamp()) % 1000}"
-        c.execute("""INSERT INTO orders (order_number, user_id, items, total, payment_method, payment_id) 
-                    VALUES (?, ?, ?, ?, ?, ?)""",
-                  (order_number, user_id, json.dumps(items), total, payment_method, payment_id))
+        c.execute("""INSERT INTO orders (order_number, user_id, items, total, payment_method, payment_id, bonus_used) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                  (order_number, user_id, json.dumps(items), total, payment_method, payment_id, bonus_used))
         order_id = c.lastrowid
         c.execute("DELETE FROM cart WHERE user_id = ?", (user_id,))
         conn.commit()
@@ -348,12 +462,13 @@ class Database:
     def get_order(self, order_id):
         conn = self.get_connection()
         c = conn.cursor()
-        c.execute("SELECT id, order_number, user_id, items, total, status, created_at FROM orders WHERE id = ?", (order_id,))
+        c.execute("SELECT id, order_number, user_id, items, total, status, bonus_used, created_at FROM orders WHERE id = ?", (order_id,))
         row = c.fetchone()
         conn.close()
         if row:
             return {"id": row[0], "order_number": row[1], "user_id": row[2], 
-                    "items": json.loads(row[3]), "total": row[4], "status": row[5], "created_at": row[6]}
+                    "items": json.loads(row[3]), "total": row[4], "status": row[5],
+                    "bonus_used": row[6], "created_at": row[7]}
         return None
     
     def get_orders(self, user_id=None, limit=50):
@@ -444,12 +559,12 @@ class SalesBot:
         self.application.add_handler(CommandHandler("admin", self.admin_command))
         self.application.add_handler(CommandHandler("cancel", self.cancel_command))
         self.application.add_handler(CommandHandler("update_currency", self.update_currency_command))
+        self.application.add_handler(CommandHandler("bonus", self.bonus_command))
         
         self.application.add_handler(CallbackQueryHandler(self.handle_callback))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         
         self.start_currency_updater()
-        
         self.application.add_error_handler(self.error_handler)
         
         logger.info("🚀 Бот запущен!")
@@ -487,6 +602,8 @@ class SalesBot:
         context.user_data.clear()
         await update.message.reply_text("✅ *Действие отменено*", parse_mode="Markdown")
     
+    # ========== КОМАНДЫ ==========
+    
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         self.db.register_user(user.id, user.username, user.first_name, user.last_name)
@@ -498,6 +615,7 @@ class SalesBot:
             [InlineKeyboardButton("🛒 Корзина", callback_data="view_cart")],
             [InlineKeyboardButton("📋 Мои заказы", callback_data="my_orders")],
             [InlineKeyboardButton("👤 Профиль", callback_data="profile")],
+            [InlineKeyboardButton("💎 Бонусы", callback_data="bonus_menu")],
             [InlineKeyboardButton("❓ Помощь", callback_data="help")]
         ]
         
@@ -516,14 +634,57 @@ class SalesBot:
 /cart - Корзина
 /orders - Мои заказы
 /profile - Профиль
+/bonus - Бонусная система
 /admin - Админ-панель (для админов)
 /update_currency - Обновить курс валют (админ)
 
-💎 *Бонусы:* 5% от суммы заказа
+💎 *Бонусы:*
+• За каждую покупку от 5 до 25 бонусов
+• 100 бонусов → 15% скидка
+• 200 бонусов → 25% скидка
+• 500 бонусов → 50% скидка
+• Обменивай бонусы на промокоды!
+
 🎁 *Промокоды:* Введите в корзине
 💰 *Курс обновляется автоматически раз в час.*
 """
         keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]]
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        else:
+            await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    
+    async def bonus_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        await self.bonus_menu(update, user_id, context)
+    
+    async def bonus_menu(self, update: Update, user_id, context):
+        bonus = self.db.get_bonus(user_id)
+        promocodes = self.db.get_user_bonus_promocodes(user_id)
+        
+        text = f"💎 *Бонусная система*\n\n"
+        text += f"💰 Твой баланс: *{bonus}* бонусов\n\n"
+        
+        if promocodes:
+            text += "📋 *Твои промокоды:*\n"
+            for p in promocodes[:5]:
+                text += f"• `{p['code']}` — {p['discount']}% скидка (действует до {p['expires_at'][:10]})\n"
+        
+        text += "\n📊 *Обмен бонусов на промокоды:*\n"
+        for cost, discount in BONUS_DISCOUNTS.items():
+            text += f"• {cost} бонусов → {discount}% скидка\n"
+        
+        keyboard = []
+        for cost, discount in BONUS_DISCOUNTS.items():
+            if bonus >= cost:
+                keyboard.append([InlineKeyboardButton(
+                    f"🔄 {cost} бонусов → {discount}% скидка",
+                    callback_data=f"exchange_bonus_{cost}"
+                )])
+        
+        keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="bonus_menu")])
+        keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")])
+        
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
@@ -582,6 +743,7 @@ class SalesBot:
 
         pending = self.db.get_pending_orders()
         pending_count = len(pending)
+        
         text = f"👑 *Админ-панель*\n\n📌 Управление:\n⏳ Заказов на подтверждение: {pending_count}"
         
         keyboard = [
@@ -590,6 +752,7 @@ class SalesBot:
             [InlineKeyboardButton("📋 Заказы", callback_data="admin_orders")],
             [InlineKeyboardButton("💳 Подтвердить оплату", callback_data="admin_confirm_payment")],
             [InlineKeyboardButton("🎁 Добавить промокод", callback_data="admin_add_promocode")],
+            [InlineKeyboardButton("💎 Управление бонусами", callback_data="admin_bonus")],
             [InlineKeyboardButton("📊 Статистика", callback_data="admin_stats")],
             [InlineKeyboardButton("🔙 Назад", callback_data="back_to_menu")]
         ]
@@ -598,6 +761,8 @@ class SalesBot:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    
+    # ========== ПОКАЗ ТОВАРОВ ==========
     
     async def show_products(self, update: Update, category=None):
         products = self.db.get_products(category)
@@ -649,6 +814,7 @@ class SalesBot:
             total += subtotal
             text += f"• {item['name']} × {item['quantity']} = {subtotal:.2f} {CURRENCY_SYMBOL}\n"
             keyboard.append([InlineKeyboardButton(f"❌ Убрать {item['name']}", callback_data=f"remove_from_cart_{item['product_id']}")])
+        
         discount = context.user_data.get("promocode_discount", 0) if context else 0
         usdt_total = self.currency.rub_to_usdt(total)
         if discount > 0:
@@ -659,14 +825,19 @@ class SalesBot:
             text += f"💰 *Итого со скидкой:* {new_total:.2f} {CURRENCY_SYMBOL} (~{new_usdt_total:.2f} USDT)"
         else:
             text += f"\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)"
+        
         keyboard.append([InlineKeyboardButton("🎁 Ввести промокод", callback_data="enter_promocode")])
+        keyboard.append([InlineKeyboardButton("💎 Использовать бонусы", callback_data="bonus_menu")])
         keyboard.append([InlineKeyboardButton("🔄 Очистить", callback_data="clear_cart")])
         keyboard.append([InlineKeyboardButton("💳 Оплатить", callback_data="checkout")])
         keyboard.append([InlineKeyboardButton("🔙 В каталог", callback_data="catalog")])
+        
         if update.callback_query:
             await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
         else:
             await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    
+    # ========== ОБРАБОТКА КНОПОК ==========
     
     async def handle_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -686,47 +857,89 @@ class SalesBot:
             await self.orders_command(update, context)
         elif data == "profile":
             await self.profile_command(update, context)
+        elif data == "bonus_menu":
+            await self.bonus_menu(update, user_id, context)
+        
         elif data.startswith("category_"):
             category = data.replace("category_", "")
             if category == "all":
                 category = None
             await self.show_products(update, category)
+        
         elif data.startswith("product_"):
             product_id = int(data.replace("product_", ""))
             await self.show_product_detail(update, product_id)
+        
         elif data.startswith("add_to_cart_"):
             product_id = int(data.replace("add_to_cart_", ""))
             self.db.add_to_cart(user_id, product_id)
             await query.edit_message_text("✅ *Товар добавлен в корзину!*", parse_mode="Markdown")
+        
         elif data.startswith("remove_from_cart_"):
             product_id = int(data.replace("remove_from_cart_", ""))
             self.db.remove_from_cart(user_id, product_id)
             await self.show_cart(update, user_id, context)
+        
         elif data == "clear_cart":
             self.db.clear_cart(user_id)
             context.user_data.pop("promocode_discount", None)
+            context.user_data.pop("bonus_used", None)
             await self.show_cart(update, user_id, context)
+        
         elif data == "enter_promocode":
             context.user_data["awaiting_promocode"] = True
             await query.edit_message_text(
                 "🎁 *Введите промокод*\n\nОтправьте код одним сообщением.\nДля отмены отправьте /cancel",
                 parse_mode="Markdown"
             )
+        
+        # ===== БОНУСЫ: ОБМЕН =====
+        elif data.startswith("exchange_bonus_"):
+            bonus_cost = int(data.replace("exchange_bonus_", ""))
+            current_bonus = self.db.get_bonus(user_id)
+            
+            if current_bonus < bonus_cost:
+                await query.edit_message_text(f"❌ *Недостаточно бонусов!*\n\nНужно: {bonus_cost}\nУ тебя: {current_bonus}", parse_mode="Markdown")
+                return
+            
+            discount = self.db.get_bonus_discount(bonus_cost)
+            code = self.db.create_bonus_promocode(user_id, bonus_cost, discount)
+            
+            await query.edit_message_text(
+                f"✅ *Промокод создан!*\n\n"
+                f"🎁 Код: `{code}`\n"
+                f"📊 Скидка: {discount}%\n"
+                f"💎 Списано бонусов: {bonus_cost}\n"
+                f"💰 Остаток бонусов: {self.db.get_bonus(user_id)}\n\n"
+                f"📌 Введи промокод в корзине!",
+                parse_mode="Markdown"
+            )
+            await self.bonus_menu(update, user_id, context)
+        
         elif data == "checkout":
             cart = self.db.get_cart(user_id)
             if not cart:
                 await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
                 return
+            
             total = self.db.get_cart_total(user_id)
             discount = context.user_data.get("promocode_discount", 0)
+            bonus_used = context.user_data.get("bonus_used", 0)
             usdt_total = self.currency.rub_to_usdt(total)
+            
             if discount > 0:
                 final_total = total * (1 - discount / 100)
                 final_usdt = self.currency.rub_to_usdt(final_total)
-                text = f"💳 *Оформление заказа*\n\n💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n🎁 *Скидка:* {discount}%\n💰 *Итого со скидкой:* {final_total:.2f} {CURRENCY_SYMBOL} (~{final_usdt:.2f} USDT)\n\nВыбери способ оплаты:"
+                text = f"💳 *Оформление заказа*\n\n"
+                text += f"💰 *Итого без скидки:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n"
+                text += f"🎁 *Скидка:* {discount}%\n"
+                text += f"💎 *Списано бонусов:* {bonus_used}\n"
+                text += f"💰 *Итого со скидкой:* {final_total:.2f} {CURRENCY_SYMBOL} (~{final_usdt:.2f} USDT)\n\n"
+                text += "Выбери способ оплаты:"
             else:
                 final_total = total
                 text = f"💳 *Оформление заказа*\n\n💰 *Итого:* {total:.2f} {CURRENCY_SYMBOL} (~{usdt_total:.2f} USDT)\n\nВыбери способ оплаты:"
+            
             keyboard = [
                 [InlineKeyboardButton("💳 FreeKassa", callback_data="pay_freekassa")],
                 [InlineKeyboardButton("🪙 CryptoBot (USDT)", callback_data="pay_cryptobot")],
@@ -744,20 +957,18 @@ class SalesBot:
             total = self.db.get_cart_total(user_id)
             discount = context.user_data.get("promocode_discount", 0)
             final_total = total * (1 - discount / 100) if discount > 0 else total
+            
+            bonus_used = context.user_data.get("bonus_used", 0)
+            
+            order_id, order_number = self.db.create_order(user_id, cart, final_total, "freekassa", bonus_used=bonus_used)
 
-            order_id, order_number = self.db.create_order(user_id, cart, final_total, "freekassa")
-
-            # ========== ИСПРАВЛЕННЫЙ БЛОК ==========
             merchant_id = FREAKASSA_MERCHANT_ID
             amount = f"{final_total:.2f}"
-            currency = "RUB"  # <--- ВАЖНО: КОД ВАЛЮТЫ, А НЕ СИМВОЛ
+            currency = "RUB"
             secret_key = FREAKASSA_SECRET_KEY
             order = str(order_id)
 
-            # ПОДПИСЬ ПО ДОКУМЕНТАЦИИ (с валютой)
             sign = hashlib.md5(f"{merchant_id}:{amount}:{secret_key}:{currency}:{order}".encode()).hexdigest()
-
-            # ПРАВИЛЬНЫЙ URL ДЛЯ ОПЛАТЫ
             payment_url = f"https://pay.fk.money/?m={merchant_id}&oa={amount}&o={order}&s={sign}&currency={currency}"
 
             logger.info(f"🔗 Ссылка на оплату: {payment_url}")
@@ -793,7 +1004,8 @@ class SalesBot:
             total = self.db.get_cart_total(user_id)
             discount = context.user_data.get("promocode_discount", 0)
             final_total = total * (1 - discount / 100) if discount > 0 else total
-            order_id, order_number = self.db.create_order(user_id, cart, final_total, "manual")
+            bonus_used = context.user_data.get("bonus_used", 0)
+            order_id, order_number = self.db.create_order(user_id, cart, final_total, "manual", bonus_used=bonus_used)
             for admin_id in ADMIN_IDS:
                 try:
                     await context.bot.send_message(
@@ -826,12 +1038,15 @@ class SalesBot:
                 await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
                 return
             total = self.db.get_cart_total(user_id)
-            order_id, order_number = self.db.create_order(user_id, cart, total, "cryptobot")
-            usdt_amount = self.currency.rub_to_usdt(total)
+            discount = context.user_data.get("promocode_discount", 0)
+            final_total = total * (1 - discount / 100) if discount > 0 else total
+            bonus_used = context.user_data.get("bonus_used", 0)
+            order_id, order_number = self.db.create_order(user_id, cart, final_total, "cryptobot", bonus_used=bonus_used)
+            usdt_amount = self.currency.rub_to_usdt(final_total)
             await query.edit_message_text(
                 f"🪙 *Оплата через CryptoBot*\n\n"
                 f"📦 Заказ: #{order_number}\n"
-                f"💰 Сумма: {total:.2f} {CURRENCY_SYMBOL} ≈ {usdt_amount:.2f} USDT\n\n"
+                f"💰 Сумма: {final_total:.2f} {CURRENCY_SYMBOL} ≈ {usdt_amount:.2f} USDT\n\n"
                 f"1️⃣ Напишите @CryptoBot\n"
                 f"2️⃣ Нажмите «Создать счёт»\n"
                 f"3️⃣ Введите сумму: {usdt_amount:.2f} USDT\n"
@@ -961,24 +1176,38 @@ class SalesBot:
             if user_id not in ADMIN_IDS:
                 await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
                 return
+            
             order_id = int(data.replace("admin_confirm_", ""))
             order = self.db.get_order(order_id)
             if not order:
                 await query.edit_message_text("❌ *Заказ не найден*", parse_mode="Markdown")
                 return
+            
+            # Меняем статус
             self.db.update_order_status(order_id, "paid")
-            bonus_points = int(order['total'] * 5)
+            
+            # Начисляем бонусы (от 5 до 25)
+            bonus_points = random.randint(BONUS_MIN, BONUS_MAX)
             self.db.add_bonus(order['user_id'], bonus_points)
+            
+            # Автоматическая выдача цифровых товаров
             digital_links = []
             for item in order['items']:
                 product = self.db.get_product(item["product_id"])
                 if product and product.get('is_digital') and product.get('digital_content'):
                     digital_links.append(f"• {product['name']}: {product['digital_content']}")
+            
+            # Уведомление пользователю
             try:
                 user_text = f"✅ *Ваш заказ #{order['order_number']} подтверждён и оплачен!*\n\nСпасибо за покупку! 🎉"
+                
                 if digital_links:
                     user_text += f"\n\n📦 *Цифровые товары:*\n\n" + "\n".join(digital_links)
+                
                 user_text += f"\n\n💎 *Начислено бонусов:* {bonus_points}"
+                current_bonus = self.db.get_bonus(order['user_id'])
+                user_text += f"\n💰 *Текущий баланс бонусов:* {current_bonus}"
+                
                 await context.bot.send_message(
                     chat_id=order['user_id'],
                     text=user_text,
@@ -986,6 +1215,7 @@ class SalesBot:
                 )
             except Exception as e:
                 logger.error(f"Ошибка уведомления пользователя: {e}")
+            
             await query.edit_message_text(f"✅ *Заказ #{order['order_number']} подтверждён!*\n\n💎 Начислено бонусов: {bonus_points}", parse_mode="Markdown")
             await self.admin_command(update, context)
 
@@ -999,11 +1229,57 @@ class SalesBot:
             text += f"📦 Товаров в наличии: {stats['in_stock']}"
             keyboard = [[InlineKeyboardButton("🔙 Назад", callback_data="admin")]]
             await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+        
+        # ===== АДМИН: БОНУСЫ =====
+        elif data == "admin_bonus":
+            if user_id not in ADMIN_IDS:
+                await query.edit_message_text("⛔ *Нет доступа*", parse_mode="Markdown")
+                return
+            await query.edit_message_text(
+                "💎 *Управление бонусами*\n\n"
+                "Отправь команду:\n"
+                "`/add_bonus USER_ID КОЛИЧЕСТВО`\n\n"
+                "Пример:\n"
+                "`/add_bonus 8563327706 50`\n\n"
+                "Для отмены отправь /cancel",
+                parse_mode="Markdown"
+            )
+            context.user_data["admin_mode"] = "add_bonus"
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         text = update.message.text
         
+        # ===== АДМИН: ДОБАВЛЕНИЕ БОНУСОВ =====
+        if context.user_data.get("admin_mode") == "add_bonus":
+            if user_id not in ADMIN_IDS:
+                await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
+                context.user_data["admin_mode"] = None
+                return
+            if text == "/cancel":
+                context.user_data["admin_mode"] = None
+                await update.message.reply_text("❌ *Отменено*", parse_mode="Markdown")
+                return
+            parts = text.split()
+            if len(parts) < 2:
+                await update.message.reply_text("❌ *Неверный формат*\n\nНужно: `/add_bonus USER_ID КОЛИЧЕСТВО`", parse_mode="Markdown")
+                return
+            try:
+                target_user = int(parts[0])
+                points = int(parts[1])
+                self.db.add_bonus(target_user, points)
+                context.user_data["admin_mode"] = None
+                await update.message.reply_text(
+                    f"✅ *Бонусы добавлены!*\n\n"
+                    f"👤 Пользователь: {target_user}\n"
+                    f"💎 Начислено: {points} бонусов",
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                await update.message.reply_text(f"❌ *Ошибка:* {str(e)}", parse_mode="Markdown")
+            return
+        
+        # ===== ДОБАВЛЕНИЕ ТОВАРА =====
         if context.user_data.get("admin_mode") == "add_product":
             if user_id not in ADMIN_IDS:
                 await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -1049,6 +1325,7 @@ class SalesBot:
                 await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
         
+        # ===== ДОБАВЛЕНИЕ ПРОМОКОДА =====
         if context.user_data.get("admin_mode") == "add_promocode":
             if user_id not in ADMIN_IDS:
                 await update.message.reply_text("⛔ *Нет доступа*", parse_mode="Markdown")
@@ -1083,21 +1360,39 @@ class SalesBot:
                 await update.message.reply_text(f"❌ Ошибка: {str(e)}")
             return
         
+        # ===== ВВОД ПРОМОКОДА =====
         if context.user_data.get("awaiting_promocode"):
             code = text.strip().upper()
+            
+            # Сначала проверяем бонус-промокод
+            bonus_discount = self.db.use_bonus_promocode(code)
+            if bonus_discount:
+                context.user_data["promocode_discount"] = bonus_discount
+                context.user_data["awaiting_promocode"] = False
+                await update.message.reply_text(
+                    f"✅ *Промокод применён!*\n\n"
+                    f"🎁 Скидка: {bonus_discount}%\n\n"
+                    f"Перейдите в корзину для оформления заказа.",
+                    parse_mode="Markdown"
+                )
+                await self.show_cart(update, user_id, context)
+                return
+            
+            # Потом проверяем админ-промокод
             result = self.db.apply_promocode(code)
             if result["success"]:
                 discount = result["discount"]
                 context.user_data["promocode_discount"] = discount
                 context.user_data["awaiting_promocode"] = False
                 await update.message.reply_text(
-                    f"✅ Промокод применён!\n\n"
+                    f"✅ *Промокод применён!*\n\n"
                     f"🎁 Скидка: {discount}%\n\n"
-                    f"Перейдите в корзину для оформления заказа."
+                    f"Перейдите в корзину для оформления заказа.",
+                    parse_mode="Markdown"
                 )
                 await self.show_cart(update, user_id, context)
             else:
-                await update.message.reply_text(f"❌ {result['error']}")
+                await update.message.reply_text(f"❌ {result['error']}", parse_mode="Markdown")
             return
         
         await update.message.reply_text("❓ Используй кнопки или команды: /start, /catalog, /help")
