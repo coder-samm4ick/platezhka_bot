@@ -15,7 +15,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== КОНФИГУРАЦИЯ ==========
-# ВСТАВЬ НОВЫЙ ТОКЕН ОТ @BotFather
 BOT_TOKEN = "8896855591:AAGS5EE1pUCsyD_T65NiOldrkZwFI0gHI6Q"
 ADMIN_IDS = [8563327706]
 
@@ -740,13 +739,21 @@ class SalesBot:
             if not cart:
                 await query.edit_message_text("❌ *Корзина пуста*", parse_mode="Markdown")
                 return
+            
             total = self.db.get_cart_total(user_id)
             discount = context.user_data.get("promocode_discount", 0)
             final_total = total * (1 - discount / 100) if discount > 0 else total
+            
             order_id, order_number = self.db.create_order(user_id, cart, final_total, "freekassa")
-            total_formatted = f"{final_total:.2f}"
-            sign = hashlib.md5(f"{FREAKASSA_MERCHANT_ID}:{total_formatted}:{FREAKASSA_SECRET_KEY}:{order_id}".encode()).hexdigest()
-            payment_url = f"https://pay.freekassa.ru/?m={FREAKASSA_MERCHANT_ID}&oa={total_formatted}&o={order_id}&s={sign}"
+            amount = f"{final_total:.2f}"
+            order = str(order_id)
+            
+            sign = hashlib.md5(f"{FREAKASSA_MERCHANT_ID}:{amount}:{FREAKASSA_SECRET_KEY}:{order}".encode()).hexdigest()
+            
+            payment_url = f"https://pay.freekassa.ru/?m={FREAKASSA_MERCHANT_ID}&oa={amount}&o={order}&s={sign}"
+            
+            logger.info(f"🔗 Ссылка на оплату: {payment_url}")
+            
             for admin_id in ADMIN_IDS:
                 try:
                     await context.bot.send_message(
@@ -756,8 +763,12 @@ class SalesBot:
                     )
                 except Exception as e:
                     logger.error(f"Ошибка уведомления админа: {e}")
+            
             await query.edit_message_text(
-                f"💳 *Оплата через FreeKassa*\n\n📦 Заказ: #{order_number}\n💰 Сумма: {total_formatted} {CURRENCY_SYMBOL}\n\n🔗 Нажми на кнопку для оплаты:",
+                f"💳 *Оплата через FreeKassa*\n\n"
+                f"📦 Заказ: #{order_number}\n"
+                f"💰 Сумма: {amount} {CURRENCY_SYMBOL}\n\n"
+                f"🔗 Нажми на кнопку для оплаты:",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("💳 Перейти к оплате", url=payment_url)],
                     [InlineKeyboardButton("✅ Проверить оплату", callback_data=f"check_order_{order_id}")],
