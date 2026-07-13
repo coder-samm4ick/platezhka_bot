@@ -11,9 +11,12 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ========== БАЗА ДАННЫХ (ФИКС) ==========
+DB_PATH = os.path.join(os.path.dirname(__file__), "sales_bot.db")
+
 def get_db():
     """Подключение к базе данных"""
-    conn = sqlite3.connect("sales_bot.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
