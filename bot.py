@@ -15,12 +15,13 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
 # ========== КОНФИГУРАЦИЯ ==========
-BOT_TOKEN = "8896855591:AAF837-w09REedQe2RCSzSJhlhT7BKUrEQ0"
+# ВСТАВЬ НОВЫЙ ТОКЕН ОТ @BotFather
+BOT_TOKEN = "8896855591:AAGS5EE1pUCsyD_T65NiOldrkZwFI0gHI6Q"
 ADMIN_IDS = [8563327706]
 
 # FreeKassa
 FREAKASSA_MERCHANT_ID = "74630"
-FREAKASSA_SECRET_KEY = "989ce9d4a83698f3b510fed671f7f073"
+FREAKASSA_SECRET_KEY = "adellna"  # ИСПРАВЛЕНО!
 
 # CryptoBot
 CRYPTOBOT_LINK = "https://t.me/send?start=IViV3moF8VZf"
